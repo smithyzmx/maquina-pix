@@ -5,66 +5,48 @@ const admin = require('firebase-admin');
 const app = express();
 app.use(express.json());
 
-// Inicializa o Firebase com a chave que você baixou
-const serviceAccount = require("./firebase-key.json");
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com/" // TROQUE PELO SEU LINK
-});
+// 1. Inicialização do Firebase
+try {
+    const serviceAccount = require("./firebase-key.json");
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com/" 
+    });
+    console.log("Conectado ao Firebase com sucesso!");
+} catch (error) {
+    console.error("Erro crítico na inicialização do Firebase:", error.message);
+}
 
 const db = admin.database();
 
+// 2. Webhook oficial do Mercado Pago
 app.post('/webhook', async (req, res) => {
-    const paymentId = req.body.data?.id;
+    const paymentId = req.body.data?.id || (req.body.resource ? req.body.resource.split('/').pop() : null);
 
     if (paymentId) {
         try {
-            // Consulta o Mercado Pago (O Token vai ficar escondido no Heroku)
             const response = await axios.get(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
                 headers: { 'Authorization': `Bearer ${process.env.MP_TOKEN}` }
             });
 
             if (response.data.status === 'approved') {
                 const valor = response.data.transaction_amount;
-                const pulsos = Math.floor(valor / 2); // Sua regra de 2 reais
+                const pulsos = Math.floor(valor / 2); // Regra: R$ 2,00 = 1 pulso
                 
-                // Manda para o Firebase
                 await db.ref('maquina1/credito').set(pulsos);
-                console.log(`Sucesso! ${pulsos} pulsos enviados.`);
+                console.log(`✅ PIX Aprovado: ${valor} reais -> ${pulsos} pulsos enviados.`);
             }
         } catch (error) {
-            console.error("Erro ao consultar MP:", error.message);
+            console.error("❌ Erro ao consultar Mercado Pago:", error.message);
         }
     }
     res.sendStatus(200);
 });
 
-const PORT = process.env.PORT || 3000;
-
-// Uma página simples para você acessar do celular
-app.get('/painel-controle', (req, res) => {
+// 3. Painel de Controle Visual
+app.get('/painel', (req, res) => {
     res.send(`
-        <h1>Painel da Máquina</h1>
-        <button onclick="liberar()">Liberar 1 Crédito (Máquina 1)</button>
-        <script>
-            function liberar() {
-                fetch('/webhook-manual', { method: 'POST' })
-                .alert('Comando enviado!');
-            }
-        </script>
-    `);
-});
-
-// Esta rota agora aceita o clique do botão (POST) e o link do navegador (GET)
-app.all('/webhook-manual', async (req, res) => {
-    console.log("Recebi um comando manual! Tentando falar com o Firebase...");
-    try {
-        await db.ref('maquina1/credito').set(1);
-        console.log("✅ Sucesso! O valor 1 foi escrito no Firebase.");
-        res.send("<h1>Sucesso!</h1><p>O crédito foi enviado para o Firebase.</p>");
-    } catch (error) {
-        console.error("❌ Erro ao escrever no Firebase:", error.message);
-        res.status(500).send("Erro ao acessar o Firebase: " + error.message);
-    }
-});
-
+        <div style="text-align:center; font-family:sans-serif; margin-top:50px; background:#f4f4f4; padding:20px;">
+            <h1>🕹️ Painel de Controle - Gravatá</h1>
+            <p>Toque no botão abaixo para testar a máquina.</p>
+            <button onclick="liberar()" style="padding:25px 50px; font-size:2
