@@ -6,49 +6,21 @@ app.use(express.json());
 
 const FIREBASE_URL = "https://maquinapelucia-222e9-default-rtdb.firebaseio.com/";
 
+// CONFIGURAÇÃO SEGURA (Sem arquivo físico)
 try {
-    const serviceAccount = require("./firebase-key.json");
+    // Aqui ele tenta ler a variável que você colou no Render
+    const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
+    
     if (!admin.apps.length) {
         admin.initializeApp({
             credential: admin.credential.cert(serviceAccount),
             databaseURL: FIREBASE_URL
         });
     }
-    console.log("✅ Conectado ao Firebase!");
+    console.log("✅ Conectado ao Firebase via Env Var!");
 } catch (e) {
-    console.log("❌ Erro na chave JSON: " + e.message);
+    console.log("❌ Erro ao ler variável de ambiente: " + e.message);
 }
 
 const db = admin.database();
-
-app.all('/webhook-manual', async (req, res) => {
-    const qtd = parseInt(req.query.pulsos) || 2;
-    console.log(`Enviando ${qtd} pulsos para Maquina-01...`);
-
-    try {
-        // Caminho exato da sua imagem: Vending-Machines -> Maquina-01 -> jogadas_pendentes
-        await db.ref('Vending-Machines/Maquina-01').update({
-            "jogadas_pendentes": qtd
-        });
-        
-        console.log("✅ SUCESSO! O valor mudou no Firebase.");
-        res.send(`<h1>Sucesso!</h1><p>Maquina-01 atualizada para ${qtd}.</p>`);
-    } catch (error) {
-        console.log("❌ ERRO: " + error.message);
-        res.status(500).send("Erro: " + error.message);
-    }
-});
-
-app.get('/painel', (req, res) => {
-    res.send(`
-        <div style="text-align:center; padding:50px; font-family:sans-serif;">
-            <h1>🕹️ Painel Maquina-01 - Gravatá</h1>
-            <button onclick="location.href='/webhook-manual?pulsos=2'" style="padding:20px; font-size:20px; background:green; color:white; border-radius:10px; cursor:pointer;">
-                LIBERAR 2 JOGADAS
-            </button>
-        </div>
-    `);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor rodando!"));
+// ... resto do código (rotas de webhook e painel continuam iguais)
