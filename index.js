@@ -9,7 +9,7 @@ app.use(express.json());
 const serviceAccount = require("./firebase-key.json");
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
-  databaseURL: "https://SEU-PROJETO.firebaseio.com" // TROQUE PELO SEU LINK
+  databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com/" // TROQUE PELO SEU LINK
 });
 
 const db = admin.database();
@@ -40,4 +40,5 @@ app.post('/webhook', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
