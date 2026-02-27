@@ -22,12 +22,11 @@ try {
 const db = admin.database();
 
 app.all('/webhook-manual', async (req, res) => {
-    // Se o cliente pagar R$ 2,00, enviamos 2 para o Firebase
     const qtd = parseInt(req.query.pulsos) || 2;
-    console.log(`Enviando ${qtd} para jogadas_pendentes...`);
+    console.log(`Enviando ${qtd} pulsos para Maquina-01...`);
 
     try {
-        // CAMINHO EXATO DA SUA IMAGEM: Vending-Machines -> Maquina-01 -> jogadas_pendentes
+        // Caminho exato da sua imagem: Vending-Machines -> Maquina-01 -> jogadas_pendentes
         await db.ref('Vending-Machines/Maquina-01').update({
             "jogadas_pendentes": qtd
         });
@@ -43,9 +42,9 @@ app.all('/webhook-manual', async (req, res) => {
 app.get('/painel', (req, res) => {
     res.send(`
         <div style="text-align:center; padding:50px; font-family:sans-serif;">
-            <h1>🕹️ Painel Maquina-01</h1>
+            <h1>🕹️ Painel Maquina-01 - Gravatá</h1>
             <button onclick="location.href='/webhook-manual?pulsos=2'" style="padding:20px; font-size:20px; background:green; color:white; border-radius:10px; cursor:pointer;">
-                LIBERAR 2 JOGADAS (R$ 2)
+                LIBERAR 2 JOGADAS
             </button>
         </div>
     `);
