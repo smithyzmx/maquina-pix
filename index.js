@@ -32,8 +32,7 @@ app.post('/webhook', async (req, res) => {
             if (response.data.status === 'approved') {
                 const valor = response.data.transaction_amount;
                 
-                // AJUSTE: Se o valor for R$ 2, mandamos o número 2 para o Firebase
-                // O ESP8266 vai ler "2" e dar os 2 pulsos que a placa precisa
+                // AJUSTE: R$ 2,00 vira o número 2 no Firebase (para dar 2 pulsos)
                 const pulsos = Math.floor(valor); 
                 
                 await db.ref('maquina1/credito').set(pulsos);
@@ -78,12 +77,17 @@ app.get('/painel', (req, res) => {
 
 // 4. Rota de Comando (Aceita GET e POST)
 app.all('/webhook-manual', async (req, res) => {
-    // Pega a quantidade de pulsos da URL ou usa 2 como padrão
     const qtdPulsos = parseInt(req.query.pulsos) || 2;
-    
-    console.log("Comando manual: " + qtdPulsos + " pulsos.");
+    console.log("Comando manual recebido: " + qtdPulsos + " pulsos.");
     try {
         await db.ref('maquina1/credito').set(qtdPulsos);
         res.send("<h1>Sucesso!</h1><p>Enviado " + qtdPulsos + " para o Firebase.</p>");
     } catch (error) {
-        res
+        console.error("Erro no Firebase:", error.message);
+        res.status(500).send("Erro: " + error.message);
+    }
+});
+
+// 5. Início do Servidor
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Servidor online na porta ${PORT}`));
