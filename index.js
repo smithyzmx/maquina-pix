@@ -10,7 +10,7 @@ try {
     const serviceAccount = require("./firebase-key.json");
     admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
-        databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com/" 
+        databaseURL: "COLOQUE_AQUI_O_LINK_DO_SEU_FIREBASE" 
     });
     console.log("Conectado ao Firebase com sucesso!");
 } catch (error) {
@@ -31,15 +31,13 @@ app.post('/webhook', async (req, res) => {
 
             if (response.data.status === 'approved') {
                 const valor = response.data.transaction_amount;
-                
-                // AJUSTE: R$ 2,00 vira o número 2 no Firebase (para dar 2 pulsos)
                 const pulsos = Math.floor(valor); 
                 
                 await db.ref('maquina1/credito').set(pulsos);
-                console.log(`✅ PIX Aprovado: R$ ${valor} -> Enviando ${pulsos} para o Firebase.`);
+                console.log(`✅ PIX: R$ ${valor} -> ${pulsos} pulsos enviados.`);
             }
         } catch (error) {
-            console.error("❌ Erro ao consultar Mercado Pago:", error.message);
+            console.error("❌ Erro MP:", error.message);
         }
     }
     res.sendStatus(200);
@@ -53,10 +51,6 @@ app.get('/painel', (req, res) => {
             <p>Configuração: R$ 2,00 = 2 Pulsos</p>
             <button onclick="liberar(2)" style="padding:25px 50px; font-size:22px; background:#28a745; color:white; border:none; border-radius:15px; cursor:pointer; box-shadow: 0 4px #1e7e34;">
                 LIBERAR 2 PULSOS (R$ 2)
-            </button>
-            <br><br>
-            <button onclick="liberar(10)" style="padding:15px 30px; font-size:16px; background:#007bff; color:white; border:none; border-radius:10px; cursor:pointer;">
-                LIBERAR 10 PULSOS (R$ 10)
             </button>
             <h2 id="msg" style="margin-top:30px;"></h2>
         </div>
@@ -75,15 +69,14 @@ app.get('/painel', (req, res) => {
     `);
 });
 
-// 4. Rota de Comando (Aceita GET e POST)
+// 4. Rota de Comando (Manual)
 app.all('/webhook-manual', async (req, res) => {
     const qtdPulsos = parseInt(req.query.pulsos) || 2;
-    console.log("Comando manual recebido: " + qtdPulsos + " pulsos.");
+    console.log("Comando manual: " + qtdPulsos + " pulsos.");
     try {
         await db.ref('maquina1/credito').set(qtdPulsos);
         res.send("<h1>Sucesso!</h1><p>Enviado " + qtdPulsos + " para o Firebase.</p>");
     } catch (error) {
-        console.error("Erro no Firebase:", error.message);
         res.status(500).send("Erro: " + error.message);
     }
 });
