@@ -55,10 +55,16 @@ app.get('/painel-controle', (req, res) => {
     `);
 });
 
-// Rota interna para o botão funcionar
-app.post('/webhook-manual', async (req, res) => {
-    await db.ref('maquina1/credito').set(1);
-    res.sendStatus(200);
+// Esta rota agora aceita o clique do botão (POST) e o link do navegador (GET)
+app.all('/webhook-manual', async (req, res) => {
+    console.log("Recebi um comando manual! Tentando falar com o Firebase...");
+    try {
+        await db.ref('maquina1/credito').set(1);
+        console.log("✅ Sucesso! O valor 1 foi escrito no Firebase.");
+        res.send("<h1>Sucesso!</h1><p>O crédito foi enviado para o Firebase.</p>");
+    } catch (error) {
+        console.error("❌ Erro ao escrever no Firebase:", error.message);
+        res.status(500).send("Erro ao acessar o Firebase: " + error.message);
+    }
 });
 
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
