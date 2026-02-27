@@ -10,7 +10,7 @@ try {
     const serviceAccount = require("./firebase-key.json");
     admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
-        databaseURL: "COLOQUE_AQUI_O_LINK_DO_SEU_FIREBASE" 
+        databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com/" 
     });
     console.log("Conectado ao Firebase com sucesso!");
 } catch (error) {
@@ -84,3 +84,4 @@ app.all('/webhook-manual', async (req, res) => {
 // 5. Início do Servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Servidor online na porta ${PORT}`));
+
