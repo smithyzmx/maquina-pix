@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "maquinapelucia-222e9",
+  "private_key_id": "8cd2713bce72ea6c8b7ace1f34bdd915bfbc2f6d",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDFHN9p7vVaqUtP\n1KZY4o8xeyWHAYM28ue/bd9ZUBI9f6YduwHrrdt3+67T4/Ze93reprU8+DRYfbvS\n18k9JCq8zzfARYBBSuq/O2xeZzX+jtbol/zrjtSM9jlQ+LUupymrq3pnmkWYAFxe\no7AYK0QaYWiLe1qhEgdJgj0SsrmtSWcd4c1aF0lh+7g/Ok0V20KY71DtjmAKiQZr\nuN65c1QeLgE3patfRXMwFWaKq/Q1FBSfSiBhEqPe8gEIOzHCGStwu5+Xn6OpoV++\ndG0lKHLQDAo5qyfwTjRnUWxftRPtOP46RT3iARnfH60lWMJN3ZQnPJZuQwPUq5pu\n199eg6mJAgMBAAECggEADmYeoOhVO9SgR9o0IPaYjhKy9K2E27j7T7so5LyUvzF/\nCEQerrbM0IiOER724qGSnsdP99P2zkcNtygkZHHAUyS9ARqNSle8wGWeHo2iFAYf\nB1nWSTvYut0Ku1JBDqx56WHgUhyi0ajRwT0VB52eKYzXkabcFuY6/4uYHAX6dStw\nXy1B/gJ9NWFqxeQg3HI6ICYTCHON69brFnBcC5OE3q07OH1GIwdOljM8eB1DYTDO\nK1B1SkpxKPOsI3sosdBrUAGxg6vB/Kjmkp6lXGtwqFN9e0mbZgqblXkwih3kQ/Iz\nN6e5h0ZQrdGEIMgOHCcc4/Bc6tyAY71GlSBzeY7FHQKBgQDxRHnRfjYMuvJ5mikO\nZq6NaqsYRkPuulYZCjfuNBqiRivsk9xWFwG2m87Z9K+rf2Ak34j3fPw/pkc/H5Ta\nhlHhrlgIBz1Kq8tWl0mUnXTEbUPKubNLjjAoOpfXEQD6GxHXrW3ybbmLk/jOvZnB\nHWBzRaN3JhIXj6gcnQigbRqs1QKBgQDRJio56x7rmj6pNuLQ/QApE+3TOw0fzZN/\n9+RP3z7Q/9zeWREA0EgtfPdVHFNElx+7toF2dXTHgnAwsXiyOFrC5OkLAdhJ08ok\nro4ZIIWhxQuXJDiCYkS/LEcvU3LSCXSO4VmeIhqBwp+eiZpWJvRBl0UPg10nhe9d\nIC/CmCZT5QKBgF7oBNN3xmMzlvZmwge8NKXEdBFUcpySCBRJhL7bGC8FU3n4oA/t\ndOsUV0Y9jmzz6ioXFJXmQIP5MMWP8soTVFpmbpKZ5m5dLdueH3+qgKhUIvq4GeN6\nx07L3bboJW48/8PLoRhgOUDCsHkC9FyW5b3ygt73xt4l0IeQ7jfNM1URAoGBAKaf\nJBbeVNTYHkGK42ohlSYkpVyZ99u1WGQjpjVnolC49koBZQVj6YyruROKLGBBkVtn\ni35HFtD2/tAcIw7AzLXlzi8huiEe5DUTB0vHWA7Hv3MavRZKmYBAEzoF3jysobpO\nl6nee4WS+r0/3L/z6rXygGdafTVGg6qKQOJjem1tAoGBAOQH0aXHw+A0XkyMd2J2\n4rVCuvPe9+1Orb4rfTDwv2Bh0/b5sZzFYpA/X5xswNEABWQtlntj+QPELmEmzF3a\n8NDsDQ8LHjE43LEdDxFjpClTHm3orv+DcxUd1C/VcXUUfR4SAhZunurWFmQxVq+l\nz5jOgJ2DbZDyURzSP5lYxkmR\n-----END PRIVATE KEY-----\n",
+  "client_email": "firebase-adminsdk-fbsvc@maquinapelucia-222e9.iam.gserviceaccount.com",
+  "client_id": "118255471577457430491",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40maquinapelucia-222e9.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
