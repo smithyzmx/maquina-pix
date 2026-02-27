@@ -41,4 +41,24 @@ app.post('/webhook', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
+// Uma página simples para você acessar do celular
+app.get('/painel-controle', (req, res) => {
+    res.send(`
+        <h1>Painel da Máquina</h1>
+        <button onclick="liberar()">Liberar 1 Crédito (Máquina 1)</button>
+        <script>
+            function liberar() {
+                fetch('/webhook-manual', { method: 'POST' })
+                .alert('Comando enviado!');
+            }
+        </script>
+    `);
+});
+
+// Rota interna para o botão funcionar
+app.post('/webhook-manual', async (req, res) => {
+    await db.ref('maquina1/credito').set(1);
+    res.sendStatus(200);
+});
+
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
