@@ -1,87 +1,55 @@
 const express = require('express');
-const axios = require('axios');
 const admin = require('firebase-admin');
 
 const app = express();
 app.use(express.json());
 
-// 1. Inicialização do Firebase
+const FIREBASE_URL = "https://maquinapelucia-222e9-default-rtdb.firebaseio.com/";
+
 try {
     const serviceAccount = require("./firebase-key.json");
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com/" 
-    });
-    console.log("Conectado ao Firebase com sucesso!");
-} catch (error) {
-    console.error("Erro na inicialização:", error.message);
+    if (!admin.apps.length) {
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            databaseURL: FIREBASE_URL
+        });
+    }
+    console.log("✅ Conectado ao Firebase!");
+} catch (e) {
+    console.log("❌ Erro na chave JSON: " + e.message);
 }
 
 const db = admin.database();
 
-// 2. Webhook oficial do Mercado Pago
-app.post('/webhook', async (req, res) => {
-    const paymentId = req.body.data?.id || (req.body.resource ? req.body.resource.split('/').pop() : null);
-
-    if (paymentId) {
-        try {
-            const response = await axios.get(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-                headers: { 'Authorization': `Bearer ${process.env.MP_TOKEN}` }
-            });
-
-            if (response.data.status === 'approved') {
-                const valor = response.data.transaction_amount;
-                const pulsos = Math.floor(valor); 
-                
-                await db.ref('maquina1/credito').set(pulsos);
-                console.log(`✅ PIX: R$ ${valor} -> ${pulsos} pulsos enviados.`);
-            }
-        } catch (error) {
-            console.error("❌ Erro MP:", error.message);
-        }
-    }
-    res.sendStatus(200);
-});
-
-// 3. Painel de Controle Visual
-app.get('/painel', (req, res) => {
-    res.send(`
-        <div style="text-align:center; font-family:sans-serif; margin-top:50px; background:#f4f4f4; padding:20px;">
-            <h1>🕹️ Painel de Controle - Gravatá</h1>
-            <p>Configuração: R$ 2,00 = 2 Pulsos</p>
-            <button onclick="liberar(2)" style="padding:25px 50px; font-size:22px; background:#28a745; color:white; border:none; border-radius:15px; cursor:pointer; box-shadow: 0 4px #1e7e34;">
-                LIBERAR 2 PULSOS (R$ 2)
-            </button>
-            <h2 id="msg" style="margin-top:30px;"></h2>
-        </div>
-        <script>
-            function liberar(qtd) {
-                const msg = document.getElementById('msg');
-                msg.innerText = 'Enviando ' + qtd + ' pulsos...';
-                fetch(window.location.origin + '/webhook-manual?pulsos=' + qtd, { method: 'POST' })
-                .then(res => {
-                    if(res.ok) msg.innerText = '✅ ' + qtd + ' PULSOS ENVIADOS!';
-                    else msg.innerText = '❌ Erro no Servidor';
-                })
-                .catch(err => msg.innerText = '❌ Erro de Conexão');
-            }
-        </script>
-    `);
-});
-
-// 4. Rota de Comando (Manual)
 app.all('/webhook-manual', async (req, res) => {
-    const qtdPulsos = parseInt(req.query.pulsos) || 2;
-    console.log("Comando manual: " + qtdPulsos + " pulsos.");
+    // Se o cliente pagar R$ 2,00, enviamos 2 para o Firebase
+    const qtd = parseInt(req.query.pulsos) || 2;
+    console.log(`Enviando ${qtd} para jogadas_pendentes...`);
+
     try {
-        await db.ref('maquina1/credito').set(qtdPulsos);
-        res.send("<h1>Sucesso!</h1><p>Enviado " + qtdPulsos + " para o Firebase.</p>");
+        // CAMINHO EXATO DA SUA IMAGEM: Vending-Machines -> Maquina-01 -> jogadas_pendentes
+        await db.ref('Vending-Machines/Maquina-01').update({
+            "jogadas_pendentes": qtd
+        });
+        
+        console.log("✅ SUCESSO! O valor mudou no Firebase.");
+        res.send(`<h1>Sucesso!</h1><p>Maquina-01 atualizada para ${qtd}.</p>`);
     } catch (error) {
+        console.log("❌ ERRO: " + error.message);
         res.status(500).send("Erro: " + error.message);
     }
 });
 
-// 5. Início do Servidor
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor online na porta ${PORT}`));
+app.get('/painel', (req, res) => {
+    res.send(`
+        <div style="text-align:center; padding:50px; font-family:sans-serif;">
+            <h1>🕹️ Painel Maquina-01</h1>
+            <button onclick="location.href='/webhook-manual?pulsos=2'" style="padding:20px; font-size:20px; background:green; color:white; border-radius:10px; cursor:pointer;">
+                LIBERAR 2 JOGADAS (R$ 2)
+            </button>
+        </div>
+    `);
+});
 
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Servidor rodando!"));
