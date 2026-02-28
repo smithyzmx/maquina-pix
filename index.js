@@ -84,23 +84,58 @@ app.post('/reiniciar-maquina', async (req, res) => {
     res.redirect('/painel?status=reiniciando');
 });
 
-// PAINEL PROFISSIONAL
+// PAINEL PROFISSIONAL COM STATUS ONLINE/OFFLINE
 app.get('/painel', async (req, res) => {
     let pulsoAtual = 100, pausaAtual = 400;
+    let ultimoPing = 0;
+    
     try {
-        const snap = await db.ref('Vending-Machines/Maquina-01/configuracoes').once('value');
-        if(snap.exists()){
-            pulsoAtual = snap.val().tempo_pulso_ms || 100;
-            pausaAtual = snap.val().tempo_pausa_ms || 400;
+        // Lê as configurações
+        const snapConfig = await db.ref('Vending-Machines/Maquina-01/configuracoes').once('value');
+        if(snapConfig.exists()){
+            pulsoAtual = snapConfig.val().tempo_pulso_ms || 100;
+            pausaAtual = snapConfig.val().tempo_pausa_ms || 400;
+        }
+
+        // Lê o último sinal de vida (Ping)
+        const snapPing = await db.ref('Vending-Machines/Maquina-01/ultimo_ping').once('value');
+        if(snapPing.exists()){
+            ultimoPing = snapPing.val();
         }
     } catch(e) {}
+
+    // LÓGICA DO STATUS ONLINE/OFFLINE
+    const agora = Date.now();
+    const diffMinutos = (agora - ultimoPing) / 1000 / 60; // Diferença em minutos
+    
+    let statusBadge = '';
+    let textoVisto = '';
+    
+    if (ultimoPing === 0) {
+        statusBadge = '<span style="background:#6c757d; color:white; padding:5px 15px; border-radius:20px; font-size:14px;">⚪ DESCONHECIDO</span>';
+    } else if (diffMinutos <= 2.5) { 
+        // Se o último sinal foi há menos de 2 minutos e meio
+        statusBadge = '<span style="background:#28a745; color:white; padding:5px 15px; border-radius:20px; font-size:14px; box-shadow: 0 0 8px #28a745;">🟢 ONLINE</span>';
+        textoVisto = `<p style="font-size: 12px; color: #666; margin-top: 5px;">Último sinal de vida: Agora mesmo</p>`;
+    } else {
+        // Se atrasou mais de 2 minutos e meio, caiu a internet ou faltou luz
+        statusBadge = '<span style="background:#dc3545; color:white; padding:5px 15px; border-radius:20px; font-size:14px; box-shadow: 0 0 8px #dc3545;">🔴 OFFLINE</span>';
+        textoVisto = `<p style="font-size: 12px; color: #dc3545; margin-top: 5px;">Máquina sem comunicação há ${Math.floor(diffMinutos)} minutos!</p>`;
+    }
 
     const mensagem = req.query.status === 'sucesso' ? '<p style="color:green; font-weight:bold;">✅ Configurações salvas!</p>' : 
                      req.query.status === 'reiniciando' ? '<p style="color:orange; font-weight:bold;">🔄 Comando de reinício enviado para a máquina!</p>' : '';
 
     res.send(`
         <div style="text-align:center; font-family:sans-serif; padding:20px; max-width: 600px; margin: auto;">
-            <h1>🕹️ Painel Cloud - Máquinas</h1>
+            <h1>🕹️ Painel Cloud</h1>
+            
+            <div style="margin-bottom:20px; padding:10px; background-color: #f8f9fa; border-radius:10px;">
+                <h2 style="margin-bottom: 5px;">Maquina-01</h2>
+                ${statusBadge}
+                ${textoVisto}
+            </div>
+            
             ${mensagem}
             
             <div style="margin-bottom:20px; border:2px solid #28a745; padding:15px; border-radius:10px; background-color: #f8f9fa;">
@@ -125,7 +160,7 @@ app.get('/painel', async (req, res) => {
                 <h3>⚠️ Ações de Emergência (Maquina-01)</h3>
                 <form action="/reiniciar-maquina" method="POST">
                     <input type="hidden" name="maquina" value="Maquina-01">
-                    <button type="submit" onclick="return confirm('Tem certeza que deseja reiniciar a máquina à distância? A placa será desligada e ligada novamente.');" style="background:#dc3545; color:white; padding:15px 20px; width: 100%; font-size: 16px; cursor:pointer; border:none; border-radius: 5px;">🔄 Reiniciar Arduino/ESP8266</button>
+                    <button type="submit" onclick="return confirm('Tem certeza que deseja reiniciar a máquina à distância?');" style="background:#dc3545; color:white; padding:15px 20px; width: 100%; font-size: 16px; cursor:pointer; border:none; border-radius: 5px;">🔄 Reiniciar Máquina</button>
                 </form>
             </div>
         </div>
@@ -147,3 +182,4 @@ app.all('/webhook-manual', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Servidor Online!"));
+
