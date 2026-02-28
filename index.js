@@ -23,29 +23,30 @@ try {
 
 const db = admin.database();
 
-// ⏳ FUNÇÃO DE CRÉDITO COM VALIDADE (60 SEGUNDOS)
+// ⏳ FUNÇÃO DE CRÉDITO COM FILA DE ESPERA (INCREMENTO)
 async function liberarCredito(maquinaID, pulsos) {
     const ref = db.ref(`Vending-Machines/${maquinaID}`);
     try {
+        // A MÁGICA: Em vez de substituir o número, ele SOMA (+pulsos) ao valor atual
         await ref.update({
-            "jogadas_pendentes": pulsos,
+            "jogadas_pendentes": admin.database.ServerValue.increment(pulsos),
             "ultima_venda": new Date().toLocaleString("pt-BR", {timeZone: "America/Recife"})
         });
-        console.log(`✅ ${pulsos} pulsos para ${maquinaID}. Aguardando máquina...`);
+        console.log(`✅ Adicionado +${pulsos} pulsos para ${maquinaID}. Fila atualizada!`);
 
+        // O timeout continua: se a máquina estiver fora da tomada por 60 segundos, zera a fila para segurança.
         setTimeout(async () => {
             const snapshot = await ref.child("jogadas_pendentes").once("value");
             const pendentes = snapshot.val();
             if (pendentes > 0) {
                 await ref.update({ "jogadas_pendentes": 0 });
-                console.log(`❌ TIMEOUT: ${maquinaID} offline. Crédito expirado.`);
+                console.log(`❌ TIMEOUT: ${maquinaID} offline. Fila zerada.`);
             }
         }, 60000); 
     } catch (error) {
         console.error("Erro ao liberar crédito:", error.message);
     }
 }
-
 // WEBHOOK DO MERCADO PAGO
 app.post('/webhook', async (req, res) => {
     const paymentId = req.body.data?.id || (req.body.resource ? req.body.resource.split('/').pop() : null);
@@ -182,4 +183,5 @@ app.all('/webhook-manual', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Servidor Online!"));
+
 
