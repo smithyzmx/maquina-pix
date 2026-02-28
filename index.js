@@ -47,25 +47,49 @@ async function liberarCredito(maquinaID, pulsos) {
         console.error("Erro ao liberar crédito:", error.message);
     }
 }
-// WEBHOOK DO MERCADO PAGO
+// WEBHOOK & IPN DO MERCADO PAGO (HÍBRIDO)
 app.post('/webhook', async (req, res) => {
-    const paymentId = req.body.data?.id || (req.body.resource ? req.body.resource.split('/').pop() : null);
+    // Responde ao Mercado Pago IMEDIATAMENTE para ele não achar que o servidor caiu e tentar de novo
+    res.sendStatus(200);
+
+    let paymentId = null;
+
+    // 1. Tenta ler no formato IPN (URL Query: ?topic=payment&id=12345)
+    if (req.query.topic === 'payment' && req.query.id) {
+        paymentId = req.query.id;
+        console.log("🔔 IPN Recebido! ID:", paymentId);
+    } 
+    // 2. Tenta ler no formato Webhook Padrão (Body JSON)
+    else if (req.body.data && req.body.data.id) {
+        paymentId = req.body.data.id;
+        console.log("🔔 Webhook Recebido! ID:", paymentId);
+    } 
+    // 3. Tenta ler no formato Webhook Antigo (Resource)
+    else if (req.body.resource) {
+        paymentId = req.body.resource.split('/').pop();
+        console.log("🔔 Webhook (Resource) Recebido! ID:", paymentId);
+    }
+
+    // Se achou um ID válido, vai lá no Mercado Pago perguntar se tá pago mesmo
     if (paymentId) {
         try {
             const response = await axios.get(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
                 headers: { 'Authorization': `Bearer ${process.env.MP_TOKEN}` }
             });
+            
             if (response.data.status === 'approved') {
                 const valor = response.data.transaction_amount;
                 const pulsos = Math.floor(valor); 
                 const maquinaID = response.data.external_reference || "Maquina-01";
+                
+                console.log(`💰 Pagamento Aprovado via API: R$ ${valor}. Liberando ${pulsos} pulsos para ${maquinaID}`);
                 liberarCredito(maquinaID, pulsos);
             }
-        } catch (error) {}
+        } catch (error) {
+            console.error("❌ Erro ao consultar Mercado Pago:", error.message);
+        }
     }
-    res.sendStatus(200);
 });
-
 // ROTA: SALVAR CONFIGURAÇÕES NA NUVEM
 app.post('/salvar-config', async (req, res) => {
     const maquina = req.body.maquina || "Maquina-01";
@@ -183,5 +207,6 @@ app.all('/webhook-manual', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Servidor Online!"));
+
 
 
