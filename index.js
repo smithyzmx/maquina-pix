@@ -24,7 +24,7 @@ try {
 const db = admin.database();
 
 // =======================================================
-// LÓGICA DE HARDWARE E PAGAMENTOS (MANTIDA INTACTA)
+// LÓGICA DE HARDWARE E PAGAMENTOS 
 // =======================================================
 async function liberarCredito(maquinaID, pulsos) {
     const ref = db.ref(`Vending-Machines/${maquinaID}`);
@@ -87,7 +87,8 @@ app.post('/salvar-config', async (req, res) => {
         "tempo_pulso_ms": parseInt(req.body.pulso) || 100,
         "tempo_pausa_ms": parseInt(req.body.pausa) || 400
     });
-    res.redirect('/painel?status=sucesso');
+    // Redireciona de volta para a aba Minhas Máquinas com alerta de sucesso
+    res.redirect('/painel?aba=maquinas&status=sucesso');
 });
 
 app.post('/reiniciar-maquina', async (req, res) => {
@@ -103,7 +104,7 @@ app.all('/webhook-manual', async (req, res) => {
 });
 
 // =======================================================
-// NOVO DASHBOARD (ESTILO PAYXYZ LUMINOSO + POPUP)
+// DASHBOARD (COM SISTEMA DE ABAS / NAVEGAÇÃO)
 // =======================================================
 app.get('/painel', async (req, res) => {
     let pulsoAtual = 100, pausaAtual = 400;
@@ -114,6 +115,10 @@ app.get('/painel', async (req, res) => {
             pausaAtual = snapConfig.val().tempo_pausa_ms || 400;
         }
     } catch(e) {}
+
+    // Qual aba deve vir aberta por padrão (útil para quando salvar as configurações)
+    const abaAtiva = req.query.aba === 'maquinas' ? 'view-maquinas' : 'view-dashboard';
+    const alertMsg = req.query.status === 'sucesso' ? '✅ Configuração salva com sucesso!' : '';
 
     res.send(`
         <!DOCTYPE html>
@@ -139,15 +144,19 @@ app.get('/painel', async (req, res) => {
 
                 /* MAIN CONTENT */
                 .main { flex: 1; padding: 30px; overflow-y: auto; }
+                .view-section { display: none; }
+                .view-section.active { display: block; }
+                
                 .card { background: #fff; border-radius: 10px; border: 1px solid var(--border); padding: 25px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
                 h2 { margin-top: 0; font-size: 18px; color: #111827; margin-bottom: 20px; }
                 
                 .grid-top { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+                .grid-maquinas { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px; }
                 
                 /* CHART AREA */
                 .chart-container { height: 300px; width: 100%; }
 
-                /* MODAL POPUP (IGUAL A IMAGEM) */
+                /* MODAL POPUP */
                 .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
                 .modal { background: #fff; width: 400px; border-radius: 8px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); text-align: center; }
                 .modal-header { background: #f3f4f6; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; border-bottom: 1px solid var(--border); }
@@ -166,6 +175,13 @@ app.get('/painel', async (req, res) => {
                 /* STATUS TAGS */
                 .status-online { background: #def7ec; color: #03543f; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
                 .status-offline { background: #fde8e8; color: #9b1c1c; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+
+                /* FORMULÁRIO DE CONFIGURAÇÃO */
+                label { font-size: 0.85rem; color: var(--text-muted); font-weight: bold; }
+                .form-input { width: 100%; padding: 10px; margin: 8px 0 15px; border-radius: 6px; border: 1px solid var(--border); box-sizing: border-box; background: #f9fafb; }
+                .btn-primary { background: var(--blue); color: white; padding: 10px; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; }
+                .btn-primary:hover { background: #1e40af; }
+                hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
             </style>
         </head>
         <body>
@@ -173,42 +189,91 @@ app.get('/painel', async (req, res) => {
             <aside class="sidebar">
                 <div class="logo">Gruas<span>Gravatá</span></div>
                 <div style="margin-top: 20px;">
-                    <a class="menu-item active">📊 Dashboard</a>
-                    <a class="menu-item">🕹️ Minhas Máquinas</a>
+                    <a class="menu-item ${abaAtiva === 'view-dashboard' ? 'active' : ''}" onclick="mudarAba('view-dashboard', this)">📊 Dashboard</a>
+                    <a class="menu-item ${abaAtiva === 'view-maquinas' ? 'active' : ''}" onclick="mudarAba('view-maquinas', this)">🕹️ Minhas Máquinas</a>
                     <a class="menu-item" onclick="abrirModal()">🎟️ Enviar Créditos</a>
-                    <a class="menu-item">⚙️ Configurações</a>
                 </div>
             </aside>
 
             <main class="main">
-                <div class="grid-top">
-                    <div class="card">
-                        <h2>Faturamento <span style="font-weight: normal; color: #6b7280; font-size: 14px;">Por dia</span></h2>
-                        <div class="chart-container">
-                            <canvas id="graficoFaturamento"></canvas>
-                        </div>
-                    </div>
+                ${alertMsg ? \`<div style="background: #def7ec; color: #03543f; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bcdecb;">\${alertMsg}</div>\` : ''}
 
-                    <div style="display: flex; flex-direction: column; gap: 20px;">
-                        <div class="card" style="margin-bottom: 0;">
-                            <div style="display: flex; justify-content: space-between; align-items: center;">
-                                <h2>Máquina 01</h2>
-                                <span id="status-tag" class="status-offline">OFFLINE</span>
+                <div id="view-dashboard" class="view-section ${abaAtiva === 'view-dashboard' ? 'active' : ''}">
+                    <div class="grid-top">
+                        <div class="card">
+                            <h2>Faturamento <span style="font-weight: normal; color: #6b7280; font-size: 14px;">Por dia</span></h2>
+                            <div class="chart-container">
+                                <canvas id="graficoFaturamento"></canvas>
                             </div>
-                            <h1 id="faturamento-hoje" style="font-size: 36px; margin: 10px 0; color: var(--blue);">R$ 0,00</h1>
-                            <p style="color: var(--text-muted); font-size: 14px; margin: 0;">Total faturado hoje</p>
-                            <p style="color: var(--text-muted); font-size: 12px; margin-top: 15px;">Último ping: <span id="ultimo-ping">--:--</span></p>
                         </div>
-                        
-                        <div class="card" style="margin-bottom: 0;">
-                            <h2>Controle Rápido</h2>
-                            <button onclick="abrirModal()" style="width: 100%; padding: 12px; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: bold; margin-bottom: 10px; color: #374151;">+ Inserir Crédito</button>
-                            <form action="/reiniciar-maquina" method="POST" style="margin: 0;">
-                                <button type="submit" onclick="return confirm('Deseja reiniciar a máquina?');" style="width: 100%; padding: 12px; background: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; border-radius: 6px; cursor: pointer; font-weight: bold;">🔄 Reiniciar Placa</button>
-                            </form>
+
+                        <div style="display: flex; flex-direction: column; gap: 20px;">
+                            <div class="card" style="margin-bottom: 0;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <h2>Total Diário</h2>
+                                    <span id="status-tag" class="status-offline">OFFLINE</span>
+                                </div>
+                                <h1 id="faturamento-hoje" style="font-size: 36px; margin: 10px 0; color: var(--blue);">R$ 0,00</h1>
+                                <p style="color: var(--text-muted); font-size: 14px; margin: 0;">Faturado hoje em todas as máquinas</p>
+                            </div>
+                            
+                            <div class="card" style="margin-bottom: 0;">
+                                <h2>Ações Rápidas</h2>
+                                <button onclick="abrirModal()" style="width: 100%; padding: 12px; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: bold; color: #374151;">+ Inserir Crédito Remoto</button>
+                            </div>
                         </div>
                     </div>
                 </div>
+
+                <div id="view-maquinas" class="view-section ${abaAtiva === 'view-maquinas' ? 'active' : ''}">
+                    <h2 style="font-size: 24px;">Controle de Máquinas</h2>
+                    <p style="color: var(--text-muted); margin-bottom: 25px; margin-top: -10px;">Gerencie suas gruas cadastradas, verifique o status e calibre os componentes eletrônicos.</p>
+                    
+                    <div class="grid-maquinas">
+                        <div class="card" style="margin-bottom: 0;">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
+                                <div>
+                                    <h3 style="margin: 0; font-size: 18px; color: #111827;">🕹️ Maquina-01</h3>
+                                    <span style="font-size: 12px; color: var(--text-muted);">Local: Gravatá - PE</span>
+                                </div>
+                                <span id="status-tag-lista" class="status-offline">OFFLINE</span>
+                            </div>
+                            
+                            <p style="color: var(--text-muted); font-size: 13px; margin: 0;">Último ping: <span id="ultimo-ping">--:--</span></p>
+                            <p style="color: var(--text-muted); font-size: 13px; margin: 5px 0 0 0;">Placa: Wemos D1 Mini Pro (ESP8266)</p>
+                            
+                            <hr>
+                            
+                            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                                <button onclick="abrirModal()" style="flex: 1; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: bold; color: #374151; font-size: 12px;">🎟️ Dar Crédito</button>
+                                <form action="/reiniciar-maquina" method="POST" style="flex: 1; margin: 0;">
+                                    <input type="hidden" name="maquina" value="Maquina-01">
+                                    <button type="submit" onclick="return confirm('Deseja reiniciar a placa?');" style="width: 100%; padding: 10px; background: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px;">🔄 Reiniciar</button>
+                                </form>
+                            </div>
+
+                            <h4 style="margin: 0 0 15px 0; color: #374151;">⚙️ Calibragem do Relé (Moedeiro)</h4>
+                            <form action="/salvar-config" method="POST">
+                                <input type="hidden" name="maquina" value="Maquina-01">
+                                
+                                <label>Tempo do Pulso (Milissegundos):</label>
+                                <input type="number" name="pulso" class="form-input" value="${pulsoAtual}" required>
+                                
+                                <label>Tempo de Pausa entre Pulsos (ms):</label>
+                                <input type="number" name="pausa" class="form-input" value="${pausaAtual}" required>
+                                
+                                <button type="submit" class="btn-primary">💾 Salvar na Nuvem</button>
+                            </form>
+                        </div>
+
+                        <div class="card" style="margin-bottom: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 2px dashed #d1d5db; background: transparent; cursor: pointer;">
+                            <div style="font-size: 40px; color: #9ca3af; margin-bottom: 10px;">+</div>
+                            <h3 style="margin: 0; color: #6b7280;">Adicionar Máquina</h3>
+                            <p style="color: #9ca3af; font-size: 12px; text-align: center;">Cadastre uma nova grua no sistema</p>
+                        </div>
+                    </div>
+                </div>
+
             </main>
 
             <div id="modalCredito" class="modal-overlay">
@@ -234,92 +299,12 @@ app.get('/painel', async (req, res) => {
             </div>
 
             <script>
-                // CONTROLE DO MODAL
-                function abrirModal() { document.getElementById('modalCredito').style.display = 'flex'; }
-                function fecharModal() { document.getElementById('modalCredito').style.display = 'none'; }
-                
-                function enviarCredito() {
-                    const btn = document.getElementById('btn-enviar-modal');
-                    const qtd = document.getElementById('qtdPulsos').value;
-                    btn.innerText = 'ENVIANDO...';
+                // SISTEMA DE NAVEGAÇÃO DE ABAS
+                function mudarAba(idAba, elementoLista) {
+                    // Esconde todas as abas
+                    document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+                    // Remove a cor azul de todos os links do menu
+                    document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
                     
-                    fetch('/webhook-manual?maquina=Maquina-01&pulsos=' + qtd)
-                    .then(() => {
-                        btn.innerText = 'SUCESSO!';
-                        btn.style.background = '#10b981'; // Fica verde
-                        setTimeout(() => {
-                            fecharModal();
-                            btn.innerText = 'ENVIAR CRÉDITO';
-                            btn.style.background = '#fbbf24';
-                            document.getElementById('qtdPulsos').value = 1;
-                        }, 1500);
-                    });
-                }
-
-                // INTEGRAÇÃO FIREBASE & GRÁFICOS
-                const firebaseConfig = { databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" };
-                firebase.initializeApp(firebaseConfig);
-                const db = firebase.database();
-
-                // 1. INICIALIZA O GRÁFICO (CHART.JS)
-                const ctx = document.getElementById('graficoFaturamento').getContext('2d');
-                let grafico = new Chart(ctx, {
-                    type: 'bar',
-                    data: { labels: [], datasets: [{ label: 'Faturamento (R$)', data: [], backgroundColor: '#93c5fd', hoverBackgroundColor: '#3b82f6', borderRadius: 4 }] },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { borderDash: [4, 4] } }, x: { grid: { display: false } } } }
-                });
-
-                // 2. LER VENDAS EM TEMPO REAL
-                db.ref('/Vending-Machines/Maquina-01/historico_vendas').on('value', snap => {
-                    let totalHoje = 0;
-                    const vendasPorDia = {};
-                    
-                    const hojeStr = new Date().toLocaleDateString('pt-BR');
-
-                    snap.forEach(venda => {
-                        const dados = venda.val();
-                        const dataVenda = new Date(dados.data);
-                        const dataStr = dataVenda.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-                        
-                        // Soma pro gráfico
-                        if(!vendasPorDia[dataStr]) vendasPorDia[dataStr] = 0;
-                        vendasPorDia[dataStr] += dados.valor;
-
-                        // Soma pro card de hoje
-                        if (dataVenda.toLocaleDateString('pt-BR') === hojeStr) {
-                            totalHoje += dados.valor;
-                        }
-                    });
-
-                    // Atualiza Card
-                    document.getElementById('faturamento-hoje').innerText = 'R$ ' + totalHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
-
-                    // Atualiza Gráfico
-                    grafico.data.labels = Object.keys(vendasPorDia).slice(-7); // Mostra últimos 7 dias
-                    grafico.data.datasets[0].data = Object.values(vendasPorDia).slice(-7);
-                    grafico.update();
-                });
-
-                // 3. LER STATUS PING
-                db.ref('/Vending-Machines/Maquina-01/ultimo_ping').on('value', snap => {
-                    if(!snap.exists()) return;
-                    const diffSegundos = (Date.now() - snap.val()) / 1000;
-                    const tag = document.getElementById('status-tag');
-                    
-                    if (diffSegundos < 120) {
-                        tag.innerText = "ONLINE";
-                        tag.className = "status-online";
-                    } else {
-                        tag.innerText = "OFFLINE";
-                        tag.className = "status-offline";
-                    }
-                    document.getElementById('ultimo-ping').innerText = new Date(snap.val()).toLocaleTimeString('pt-BR');
-                });
-            </script>
-        </body>
-        </html>
-    `);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor Online rodando a Dashboard Profissional!"));
+                    // Mostra a aba certa e pinta o botão clicado
+                    document.getElementById(idAba).classList.add('active');
