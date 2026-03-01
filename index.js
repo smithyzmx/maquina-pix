@@ -87,7 +87,6 @@ app.post('/salvar-config', async (req, res) => {
         "tempo_pulso_ms": parseInt(req.body.pulso) || 100,
         "tempo_pausa_ms": parseInt(req.body.pausa) || 400
     });
-    // Redireciona de volta para a aba Minhas Máquinas com alerta de sucesso
     res.redirect('/painel?aba=maquinas&status=sucesso');
 });
 
@@ -116,7 +115,6 @@ app.get('/painel', async (req, res) => {
         }
     } catch(e) {}
 
-    // Qual aba deve vir aberta por padrão (útil para quando salvar as configurações)
     const abaAtiva = req.query.aba === 'maquinas' ? 'view-maquinas' : 'view-dashboard';
     const alertMsg = req.query.status === 'sucesso' ? '✅ Configuração salva com sucesso!' : '';
 
@@ -196,7 +194,7 @@ app.get('/painel', async (req, res) => {
             </aside>
 
             <main class="main">
-                ${alertMsg ? \`<div style="background: #def7ec; color: #03543f; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bcdecb;">\${alertMsg}</div>\` : ''}
+                ${alertMsg ? '<div style="background: #def7ec; color: #03543f; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bcdecb;">' + alertMsg + '</div>' : ''}
 
                 <div id="view-dashboard" class="view-section ${abaAtiva === 'view-dashboard' ? 'active' : ''}">
                     <div class="grid-top">
@@ -301,10 +299,97 @@ app.get('/painel', async (req, res) => {
             <script>
                 // SISTEMA DE NAVEGAÇÃO DE ABAS
                 function mudarAba(idAba, elementoLista) {
-                    // Esconde todas as abas
                     document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
-                    // Remove a cor azul de todos os links do menu
                     document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
                     
-                    // Mostra a aba certa e pinta o botão clicado
                     document.getElementById(idAba).classList.add('active');
+                    elementoLista.classList.add('active');
+                }
+
+                // CONTROLE DO MODAL
+                function abrirModal() { document.getElementById('modalCredito').style.display = 'flex'; }
+                function fecharModal() { document.getElementById('modalCredito').style.display = 'none'; }
+                
+                function enviarCredito() {
+                    const btn = document.getElementById('btn-enviar-modal');
+                    const qtd = document.getElementById('qtdPulsos').value;
+                    btn.innerText = 'ENVIANDO...';
+                    
+                    fetch('/webhook-manual?maquina=Maquina-01&pulsos=' + qtd)
+                    .then(() => {
+                        btn.innerText = 'SUCESSO!';
+                        btn.style.background = '#10b981'; 
+                        setTimeout(() => {
+                            fecharModal();
+                            btn.innerText = 'ENVIAR CRÉDITO';
+                            btn.style.background = '#fbbf24';
+                            document.getElementById('qtdPulsos').value = 1;
+                        }, 1500);
+                    });
+                }
+
+                // INTEGRAÇÃO FIREBASE & GRÁFICOS
+                const firebaseConfig = { databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" };
+                firebase.initializeApp(firebaseConfig);
+                const db = firebase.database();
+
+                const ctx = document.getElementById('graficoFaturamento').getContext('2d');
+                let grafico = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels: [], datasets: [{ label: 'Faturamento (R$)', data: [], backgroundColor: '#93c5fd', hoverBackgroundColor: '#3b82f6', borderRadius: 4 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { borderDash: [4, 4] } }, x: { grid: { display: false } } } }
+                });
+
+                db.ref('/Vending-Machines/Maquina-01/historico_vendas').on('value', snap => {
+                    let totalHoje = 0;
+                    const vendasPorDia = {};
+                    const hojeStr = new Date().toLocaleDateString('pt-BR');
+
+                    snap.forEach(venda => {
+                        const dados = venda.val();
+                        const dataVenda = new Date(dados.data);
+                        const dataStr = dataVenda.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                        
+                        if(!vendasPorDia[dataStr]) vendasPorDia[dataStr] = 0;
+                        vendasPorDia[dataStr] += dados.valor;
+
+                        if (dataVenda.toLocaleDateString('pt-BR') === hojeStr) {
+                            totalHoje += dados.valor;
+                        }
+                    });
+
+                    document.getElementById('faturamento-hoje').innerText = 'R$ ' + totalHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+
+                    grafico.data.labels = Object.keys(vendasPorDia).slice(-7); 
+                    grafico.data.datasets[0].data = Object.values(vendasPorDia).slice(-7);
+                    grafico.update();
+                });
+
+                db.ref('/Vending-Machines/Maquina-01/ultimo_ping').on('value', snap => {
+                    if(!snap.exists()) return;
+                    const diffSegundos = (Date.now() - snap.val()) / 1000;
+                    
+                    const tagDashboard = document.getElementById('status-tag');
+                    const tagLista = document.getElementById('status-tag-lista');
+                    
+                    if (diffSegundos < 120) {
+                        const texto = "ONLINE"; const classe = "status-online";
+                        if(tagDashboard) { tagDashboard.innerText = texto; tagDashboard.className = classe; }
+                        if(tagLista) { tagLista.innerText = texto; tagLista.className = classe; }
+                    } else {
+                        const texto = "OFFLINE"; const classe = "status-offline";
+                        if(tagDashboard) { tagDashboard.innerText = texto; tagDashboard.className = classe; }
+                        if(tagLista) { tagLista.innerText = texto; tagLista.className = classe; }
+                    }
+                    
+                    const elData = document.getElementById('ultimo-ping');
+                    if(elData) elData.innerText = new Date(snap.val()).toLocaleTimeString('pt-BR');
+                });
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Servidor Online rodando a Dashboard Profissional com Abas!"));
