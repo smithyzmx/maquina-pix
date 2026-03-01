@@ -23,7 +23,9 @@ try {
 
 const db = admin.database();
 
-// ⏳ FUNÇÃO DE CRÉDITO COM FILA DE ESPERA (INCREMENTO)
+// =======================================================
+// LÓGICA DE HARDWARE E PAGAMENTOS (MANTIDA INTACTA)
+// =======================================================
 async function liberarCredito(maquinaID, pulsos) {
     const ref = db.ref(`Vending-Machines/${maquinaID}`);
     try {
@@ -31,12 +33,11 @@ async function liberarCredito(maquinaID, pulsos) {
             "jogadas_pendentes": admin.database.ServerValue.increment(pulsos),
             "ultima_venda": new Date().toLocaleString("pt-BR", {timeZone: "America/Recife"})
         });
-        console.log(`✅ Adicionado +${pulsos} pulsos para ${maquinaID}. Fila atualizada!`);
+        console.log(`✅ Adicionado +${pulsos} pulsos para ${maquinaID}`);
 
         setTimeout(async () => {
             const snapshot = await ref.child("jogadas_pendentes").once("value");
-            const pendentes = snapshot.val();
-            if (pendentes > 0) {
+            if (snapshot.val() > 0) {
                 await ref.update({ "jogadas_pendentes": 0 });
                 console.log(`❌ TIMEOUT: ${maquinaID} offline. Fila zerada.`);
             }
@@ -46,24 +47,13 @@ async function liberarCredito(maquinaID, pulsos) {
     }
 }
 
-// WEBHOOK & IPN DO MERCADO PAGO (HÍBRIDO)
 app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
-
     let paymentId = null;
 
-    if (req.query.topic === 'payment' && req.query.id) {
-        paymentId = req.query.id;
-        console.log("🔔 IPN Recebido! ID:", paymentId);
-    } 
-    else if (req.body.data && req.body.data.id) {
-        paymentId = req.body.data.id;
-        console.log("🔔 Webhook Recebido! ID:", paymentId);
-    } 
-    else if (req.body.resource) {
-        paymentId = req.body.resource.split('/').pop();
-        console.log("🔔 Webhook (Resource) Recebido! ID:", paymentId);
-    }
+    if (req.query.topic === 'payment' && req.query.id) paymentId = req.query.id;
+    else if (req.body.data && req.body.data.id) paymentId = req.body.data.id;
+    else if (req.body.resource) paymentId = req.body.resource.split('/').pop();
 
     if (paymentId) {
         try {
@@ -76,25 +66,21 @@ app.post('/webhook', async (req, res) => {
                 const pulsos = Math.floor(valor); 
                 const maquinaID = response.data.external_reference || "Maquina-01";
                 
-                console.log(`💰 Pagamento Aprovado: R$ ${valor}. Liberando ${pulsos} pulsos para ${maquinaID}`);
                 liberarCredito(maquinaID, pulsos);
 
-                // ====================================================
-                // 📊 REGISTRO DE VENDAS PARA A DASHBOARD ALIMENTAR O GRÁFICO
-                // ====================================================
                 db.ref(`Vending-Machines/${maquinaID}/historico_vendas`).push({
                     valor: valor,
                     data: Date.now(),
-                    id_pagamento: paymentId
+                    id_pagamento: paymentId,
+                    metodo: 'PIX'
                 });
             }
         } catch (error) {
-            console.error("❌ Erro ao consultar Mercado Pago:", error.message);
+            console.error("Erro no Webhook:", error.message);
         }
     }
 });
 
-// ROTA: SALVAR CONFIGURAÇÕES NA NUVEM
 app.post('/salvar-config', async (req, res) => {
     const maquina = req.body.maquina || "Maquina-01";
     await db.ref(`Vending-Machines/${maquina}/configuracoes`).update({
@@ -104,176 +90,10 @@ app.post('/salvar-config', async (req, res) => {
     res.redirect('/painel?status=sucesso');
 });
 
-// ROTA: ENVIAR COMANDO DE REINICIAR
 app.post('/reiniciar-maquina', async (req, res) => {
     const maquina = req.body.maquina || "Maquina-01";
-    await db.ref(`Vending-Machines/${maquina}`).update({
-        "comando": "REINICIAR"
-    });
+    await db.ref(`Vending-Machines/${maquina}`).update({ "comando": "REINICIAR" });
     res.redirect('/painel?status=reiniciando');
-});
-
-// =======================================================
-// DASHBOARD PROFISSIONAL (DARK THEME + TEMPO REAL)
-// =======================================================
-app.get('/painel', async (req, res) => {
-    let pulsoAtual = 100, pausaAtual = 400;
-    
-    try {
-        const snapConfig = await db.ref('Vending-Machines/Maquina-01/configuracoes').once('value');
-        if(snapConfig.exists()){
-            pulsoAtual = snapConfig.val().tempo_pulso_ms || 100;
-            pausaAtual = snapConfig.val().tempo_pausa_ms || 400;
-        }
-    } catch(e) {}
-
-    const mensagem = req.query.status === 'sucesso' ? '<div class="alert success">✅ Configurações de Relé salvas com sucesso!</div>' : 
-                     req.query.status === 'reiniciando' ? '<div class="alert warning">🔄 Comando de reinício enviado para a máquina!</div>' : '';
-
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Dash - Gruas Gravatá</title>
-            <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
-            <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
-            <style>
-                :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --danger: #ef4444; --success: #22c55e; --text: #f8fafc; --text-muted: #94a3b8; }
-                body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
-                .container { width: 100%; max-width: 800px; }
-                .header { text-align: center; margin-bottom: 30px; }
-                .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-                .card { background: var(--card); padding: 25px; border-radius: 16px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3); border: 1px solid #334155; }
-                h3 { margin-top: 0; color: var(--accent); display: flex; justify-content: space-between; align-items: center; }
-                .stat { font-size: 2.8rem; font-weight: bold; color: var(--text); margin: 10px 0; }
-                .status-tag { padding: 6px 14px; border-radius: 99px; font-size: 0.85rem; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
-                .online { background: rgba(34, 197, 94, 0.2); color: var(--success); border: 1px solid var(--success); }
-                .offline { background: rgba(239, 68, 68, 0.2); color: var(--danger); border: 1px solid var(--danger); }
-                
-                label { font-size: 0.9rem; color: var(--text-muted); }
-                input[type="number"] { width: 100%; padding: 12px; margin: 8px 0 20px 0; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: white; box-sizing: border-box; font-size: 1rem; }
-                button { width: 100%; padding: 14px; border: none; border-radius: 8px; font-weight: bold; font-size: 1rem; cursor: pointer; transition: 0.2s; margin-bottom: 10px; }
-                button:active { transform: scale(0.98); }
-                .btn-primary { background: var(--accent); color: #0f172a; }
-                .btn-success { background: var(--success); color: white; }
-                .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
-                .btn-danger:hover { background: rgba(239, 68, 68, 0.1); }
-                
-                .alert { padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: center; font-weight: bold; }
-                .alert.success { background: rgba(34, 197, 94, 0.2); color: var(--success); border: 1px solid var(--success); }
-                .alert.warning { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1 style="margin: 0; color: var(--accent);">🕹️ Gruas Gravatá</h1>
-                    <p style="color: var(--text-muted); margin-top: 5px;">Painel de Controle Cloud</p>
-                </div>
-
-                ${mensagem}
-
-                <div class="grid">
-                    <div class="card">
-                        <h3>Visão Geral <span id="tag-status" class="status-tag offline">OFFLINE</span></h3>
-                        <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: -10px;">Último sinal: <span id="visto-ultimo">--:--</span></p>
-                        
-                        <div style="margin-top: 30px;">
-                            <span style="color: var(--text-muted); font-size: 0.9rem;">Faturamento Hoje</span>
-                            <div class="stat" id="faturamento">R$ 0,00</div>
-                            <span id="contagem-vendas" style="color: var(--accent); font-size: 0.9rem;">0 jogadas pagas</span>
-                        </div>
-                    </div>
-
-                    <div class="card">
-                        <h3 style="color: #f8fafc;">⚙️ Calibrar Relé</h3>
-                        <form action="/salvar-config" method="POST">
-                            <input type="hidden" name="maquina" value="Maquina-01">
-                            <label>Tempo do Pulso Ativado (ms):</label>
-                            <input type="number" name="pulso" value="${pulsoAtual}" required>
-                            
-                            <label>Tempo de Pausa entre Pulsos (ms):</label>
-                            <input type="number" name="pausa" value="${pausaAtual}" required>
-                            
-                            <button type="submit" class="btn-primary">💾 Salvar na Nuvem</button>
-                        </form>
-                    </div>
-
-                    <div class="card" style="grid-column: 1 / -1; display: flex; gap: 15px; flex-wrap: wrap; background: #0f172a;">
-                        <div style="flex: 1; min-width: 250px;">
-                            <h4 style="margin-top: 0;">Ferramentas Rápidas</h4>
-                            <button class="btn-success" onclick="liberar('Maquina-01', 1)" id="btn-teste">🎟️ Inserir 1 Crédito (Cortesia)</button>
-                            <form action="/reiniciar-maquina" method="POST" style="margin:0;">
-                                <input type="hidden" name="maquina" value="Maquina-01">
-                                <button type="submit" class="btn-danger" onclick="return confirm('Deseja forçar o reinício da placa remotamente?');">🔄 Reiniciar Máquina (Reset)</button>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <script>
-                // Conexão Live com o Firebase (A mágica do tempo real)
-                const firebaseConfig = { databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" };
-                firebase.initializeApp(firebaseConfig);
-                const db = firebase.database();
-
-                // 1. LER FATURAMENTO EM TEMPO REAL
-                db.ref('/Vending-Machines/Maquina-01/historico_vendas').on('value', snap => {
-                    let total = 0;
-                    let qtd = 0;
-                    
-                    // Pega a meia-noite de hoje para somar só o dinheiro do dia
-                    const hoje = new Date();
-                    hoje.setHours(0,0,0,0);
-                    
-                    snap.forEach(venda => {
-                        const dados = venda.val();
-                        if(dados.data >= hoje.getTime()) {
-                            total += dados.valor;
-                            qtd++;
-                        }
-                    });
-                    
-                    document.getElementById('faturamento').innerText = 'R$ ' + total.toLocaleString('pt-BR', {minimumFractionDigits: 2});
-                    document.getElementById('contagem-vendas').innerText = qtd + ' jogadas pagas hoje';
-                });
-
-                // 2. LER STATUS PING EM TEMPO REAL
-                db.ref('/Vending-Machines/Maquina-01/ultimo_ping').on('value', snap => {
-                    if(!snap.exists()) return;
-                    
-                    const diffSegundos = (Date.now() - snap.val()) / 1000;
-                    const tag = document.getElementById('tag-status');
-                    
-                    if (diffSegundos < 120) { // Menos de 2 minutos = ONLINE
-                        tag.innerText = "ONLINE";
-                        tag.className = "status-tag online";
-                    } else {
-                        tag.innerText = "OFFLINE";
-                        tag.className = "status-tag offline";
-                    }
-                    document.getElementById('visto-ultimo').innerText = new Date(snap.val()).toLocaleTimeString('pt-BR');
-                });
-
-                // 3. BOTÃO DE CORTESIA (WEBHOOK MANUAL)
-                function liberar(id, qtd) {
-                    const btn = document.getElementById('btn-teste');
-                    const textoOriginal = btn.innerText;
-                    btn.innerText = 'Enviando...';
-                    
-                    fetch('/webhook-manual?maquina=' + id + '&pulsos=' + qtd)
-                    .then(() => {
-                        btn.innerText = '✅ Crédito Enviado!';
-                        setTimeout(() => btn.innerText = textoOriginal, 3000);
-                    });
-                }
-            </script>
-        </body>
-        </html>
-    `);
 });
 
 app.all('/webhook-manual', async (req, res) => {
@@ -282,5 +102,224 @@ app.all('/webhook-manual', async (req, res) => {
     res.send("OK");
 });
 
+// =======================================================
+// NOVO DASHBOARD (ESTILO PAYXYZ LUMINOSO + POPUP)
+// =======================================================
+app.get('/painel', async (req, res) => {
+    let pulsoAtual = 100, pausaAtual = 400;
+    try {
+        const snapConfig = await db.ref('Vending-Machines/Maquina-01/configuracoes').once('value');
+        if(snapConfig.exists()){
+            pulsoAtual = snapConfig.val().tempo_pulso_ms || 100;
+            pausaAtual = snapConfig.val().tempo_pausa_ms || 400;
+        }
+    } catch(e) {}
+
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>PayXyz Clone - Dashboard</title>
+            <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+            <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+            <style>
+                :root { --blue: #1a56db; --bg: #f4f5f7; --sidebar: #ffffff; --text: #1f2937; --text-muted: #6b7280; --border: #e5e7eb; }
+                body { margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+                
+                /* SIDEBAR */
+                .sidebar { width: 250px; background: var(--sidebar); border-right: 1px solid var(--border); padding: 20px 0; display: flex; flex-direction: column; }
+                .logo { font-size: 24px; font-weight: bold; padding: 0 20px 20px; border-bottom: 1px solid var(--border); color: #111827; }
+                .logo span { color: var(--blue); }
+                .menu-item { padding: 15px 20px; color: var(--text-muted); text-decoration: none; font-weight: 500; display: flex; align-items: center; gap: 10px; cursor: pointer; border-left: 4px solid transparent; }
+                .menu-item.active { background: #eff6ff; color: var(--blue); border-left-color: var(--blue); }
+                .menu-item:hover:not(.active) { background: #f9fafb; color: var(--text); }
+
+                /* MAIN CONTENT */
+                .main { flex: 1; padding: 30px; overflow-y: auto; }
+                .card { background: #fff; border-radius: 10px; border: 1px solid var(--border); padding: 25px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+                h2 { margin-top: 0; font-size: 18px; color: #111827; margin-bottom: 20px; }
+                
+                .grid-top { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+                
+                /* CHART AREA */
+                .chart-container { height: 300px; width: 100%; }
+
+                /* MODAL POPUP (IGUAL A IMAGEM) */
+                .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+                .modal { background: #fff; width: 400px; border-radius: 8px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); text-align: center; }
+                .modal-header { background: #f3f4f6; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; border-bottom: 1px solid var(--border); }
+                .close-btn { cursor: pointer; font-size: 20px; color: #9ca3af; }
+                .modal-body { padding: 30px 40px; }
+                .modal-body h3 { margin: 0 0 10px; font-size: 22px; color: #374151; font-weight: 600; }
+                .modal-body p { color: #6b7280; font-size: 14px; margin-bottom: 25px; }
+                
+                .input-group { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
+                .input-group input { width: 80px; padding: 12px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 18px; text-align: center; }
+                .btn-yellow { background: #fbbf24; color: #fff; border: none; padding: 12px 20px; border-radius: 4px; font-weight: bold; font-size: 14px; cursor: pointer; transition: 0.2s; flex: 1; }
+                .btn-yellow:hover { background: #f59e0b; }
+                
+                .modal-footer-text { font-size: 11px; color: #9ca3af; text-align: left; line-height: 1.4; border-top: 1px solid var(--border); padding-top: 15px; }
+
+                /* STATUS TAGS */
+                .status-online { background: #def7ec; color: #03543f; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+                .status-offline { background: #fde8e8; color: #9b1c1c; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+            </style>
+        </head>
+        <body>
+            
+            <aside class="sidebar">
+                <div class="logo">Gruas<span>Gravatá</span></div>
+                <div style="margin-top: 20px;">
+                    <a class="menu-item active">📊 Dashboard</a>
+                    <a class="menu-item">🕹️ Minhas Máquinas</a>
+                    <a class="menu-item" onclick="abrirModal()">🎟️ Enviar Créditos</a>
+                    <a class="menu-item">⚙️ Configurações</a>
+                </div>
+            </aside>
+
+            <main class="main">
+                <div class="grid-top">
+                    <div class="card">
+                        <h2>Faturamento <span style="font-weight: normal; color: #6b7280; font-size: 14px;">Por dia</span></h2>
+                        <div class="chart-container">
+                            <canvas id="graficoFaturamento"></canvas>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 20px;">
+                        <div class="card" style="margin-bottom: 0;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <h2>Máquina 01</h2>
+                                <span id="status-tag" class="status-offline">OFFLINE</span>
+                            </div>
+                            <h1 id="faturamento-hoje" style="font-size: 36px; margin: 10px 0; color: var(--blue);">R$ 0,00</h1>
+                            <p style="color: var(--text-muted); font-size: 14px; margin: 0;">Total faturado hoje</p>
+                            <p style="color: var(--text-muted); font-size: 12px; margin-top: 15px;">Último ping: <span id="ultimo-ping">--:--</span></p>
+                        </div>
+                        
+                        <div class="card" style="margin-bottom: 0;">
+                            <h2>Controle Rápido</h2>
+                            <button onclick="abrirModal()" style="width: 100%; padding: 12px; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: bold; margin-bottom: 10px; color: #374151;">+ Inserir Crédito</button>
+                            <form action="/reiniciar-maquina" method="POST" style="margin: 0;">
+                                <button type="submit" onclick="return confirm('Deseja reiniciar a máquina?');" style="width: 100%; padding: 12px; background: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; border-radius: 6px; cursor: pointer; font-weight: bold;">🔄 Reiniciar Placa</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <div id="modalCredito" class="modal-overlay">
+                <div class="modal">
+                    <div class="modal-header">
+                        <span>Crédito Remoto</span>
+                        <span class="close-btn" onclick="fecharModal()">&times;</span>
+                    </div>
+                    <div class="modal-body">
+                        <h3>Incluir Crédito<br>Remotamente</h3>
+                        <p>Informe a quantidade de pulsos que será enviado para sua máquina.</p>
+                        
+                        <div class="input-group">
+                            <input type="number" id="qtdPulsos" value="1" min="1">
+                            <button class="btn-yellow" onclick="enviarCredito()" id="btn-enviar-modal">ENVIAR CRÉDITO</button>
+                        </div>
+                        
+                        <div class="modal-footer-text">
+                            *Este botão executa a liberação do crédito na Máquina.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <script>
+                // CONTROLE DO MODAL
+                function abrirModal() { document.getElementById('modalCredito').style.display = 'flex'; }
+                function fecharModal() { document.getElementById('modalCredito').style.display = 'none'; }
+                
+                function enviarCredito() {
+                    const btn = document.getElementById('btn-enviar-modal');
+                    const qtd = document.getElementById('qtdPulsos').value;
+                    btn.innerText = 'ENVIANDO...';
+                    
+                    fetch('/webhook-manual?maquina=Maquina-01&pulsos=' + qtd)
+                    .then(() => {
+                        btn.innerText = 'SUCESSO!';
+                        btn.style.background = '#10b981'; // Fica verde
+                        setTimeout(() => {
+                            fecharModal();
+                            btn.innerText = 'ENVIAR CRÉDITO';
+                            btn.style.background = '#fbbf24';
+                            document.getElementById('qtdPulsos').value = 1;
+                        }, 1500);
+                    });
+                }
+
+                // INTEGRAÇÃO FIREBASE & GRÁFICOS
+                const firebaseConfig = { databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" };
+                firebase.initializeApp(firebaseConfig);
+                const db = firebase.database();
+
+                // 1. INICIALIZA O GRÁFICO (CHART.JS)
+                const ctx = document.getElementById('graficoFaturamento').getContext('2d');
+                let grafico = new Chart(ctx, {
+                    type: 'bar',
+                    data: { labels: [], datasets: [{ label: 'Faturamento (R$)', data: [], backgroundColor: '#93c5fd', hoverBackgroundColor: '#3b82f6', borderRadius: 4 }] },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { borderDash: [4, 4] } }, x: { grid: { display: false } } } }
+                });
+
+                // 2. LER VENDAS EM TEMPO REAL
+                db.ref('/Vending-Machines/Maquina-01/historico_vendas').on('value', snap => {
+                    let totalHoje = 0;
+                    const vendasPorDia = {};
+                    
+                    const hojeStr = new Date().toLocaleDateString('pt-BR');
+
+                    snap.forEach(venda => {
+                        const dados = venda.val();
+                        const dataVenda = new Date(dados.data);
+                        const dataStr = dataVenda.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                        
+                        // Soma pro gráfico
+                        if(!vendasPorDia[dataStr]) vendasPorDia[dataStr] = 0;
+                        vendasPorDia[dataStr] += dados.valor;
+
+                        // Soma pro card de hoje
+                        if (dataVenda.toLocaleDateString('pt-BR') === hojeStr) {
+                            totalHoje += dados.valor;
+                        }
+                    });
+
+                    // Atualiza Card
+                    document.getElementById('faturamento-hoje').innerText = 'R$ ' + totalHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+
+                    // Atualiza Gráfico
+                    grafico.data.labels = Object.keys(vendasPorDia).slice(-7); // Mostra últimos 7 dias
+                    grafico.data.datasets[0].data = Object.values(vendasPorDia).slice(-7);
+                    grafico.update();
+                });
+
+                // 3. LER STATUS PING
+                db.ref('/Vending-Machines/Maquina-01/ultimo_ping').on('value', snap => {
+                    if(!snap.exists()) return;
+                    const diffSegundos = (Date.now() - snap.val()) / 1000;
+                    const tag = document.getElementById('status-tag');
+                    
+                    if (diffSegundos < 120) {
+                        tag.innerText = "ONLINE";
+                        tag.className = "status-online";
+                    } else {
+                        tag.innerText = "OFFLINE";
+                        tag.className = "status-offline";
+                    }
+                    document.getElementById('ultimo-ping').innerText = new Date(snap.val()).toLocaleTimeString('pt-BR');
+                });
+            </script>
+        </body>
+        </html>
+    `);
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor Online rodando a Dashboard!"));
+app.listen(PORT, () => console.log("Servidor Online rodando a Dashboard Profissional!"));
