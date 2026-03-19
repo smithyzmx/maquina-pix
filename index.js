@@ -177,15 +177,15 @@ app.get('/painel', (req, res) => {
             <aside class="sidebar">
                 <div class="logo">Gruas<span>Gravatá</span></div>
                 <div class="menu-container">
-                    <a class="menu-item \${abaAtiva === 'view-dashboard' ? 'active' : ''}" onclick="mudarAba('view-dashboard', this)">📊 Dashboard</a>
-                    <a class="menu-item \${abaAtiva === 'view-maquinas' ? 'active' : ''}" onclick="mudarAba('view-maquinas', this)">🕹️ Minhas Máquinas</a>
+                    <a class="menu-item ${abaAtiva === 'view-dashboard' ? 'active' : ''}" onclick="mudarAba('view-dashboard', this)">📊 Dashboard</a>
+                    <a class="menu-item ${abaAtiva === 'view-maquinas' ? 'active' : ''}" onclick="mudarAba('view-maquinas', this)">🕹️ Minhas Máquinas</a>
                 </div>
             </aside>
 
             <main class="main">
-                \${alertMsg ? '<div style="background: #def7ec; color: #03543f; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bcdecb;">' + alertMsg + '</div>' : ''}
+                ${alertMsg ? '<div style="background: #def7ec; color: #03543f; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bcdecb;">' + alertMsg + '</div>' : ''}
 
-                <div id="view-dashboard" class="view-section \${abaAtiva === 'view-dashboard' ? 'active' : ''}">
+                <div id="view-dashboard" class="view-section ${abaAtiva === 'view-dashboard' ? 'active' : ''}">
                     <div class="grid-top">
                         <div class="card">
                             <h2>Total Diário <span style="font-weight: normal; color: #6b7280; font-size: 14px;">(Rede)</span></h2>
@@ -199,12 +199,12 @@ app.get('/painel', (req, res) => {
                     </div>
                 </div>
 
-                <div id="view-maquinas" class="view-section \${abaAtiva === 'view-maquinas' ? 'active' : ''}">
-                    <h2 style="font-size: 20px;">Controlo de Máquinas</h2>
-                    <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">Gira as suas gruas registadas.</p>
+                <div id="view-maquinas" class="view-section ${abaAtiva === 'view-maquinas' ? 'active' : ''}">
+                    <h2 style="font-size: 20px;">Controle de Máquinas</h2>
+                    <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">Gerencie suas gruas cadastradas.</p>
                     
                     <div class="grid-maquinas" id="container-maquinas">
-                        <div style="text-align: center; color: #9ca3af; width: 100%; padding: 20px;">A aguardar dados da nuvem...</div>
+                        <div style="text-align: center; color: #9ca3af; width: 100%; padding: 20px;">Aguardando dados da nuvem...</div>
                     </div>
                 </div>
             </main>
@@ -245,7 +245,7 @@ app.get('/painel', (req, res) => {
                     const btn = document.getElementById('btn-enviar-modal');
                     const idMaquina = document.getElementById('modal-maquina-id').value;
                     const qtd = document.getElementById('qtdPulsos').value;
-                    btn.innerText = 'A ENVIAR...';
+                    btn.innerText = 'ENVIANDO...';
                     
                     fetch('/webhook-manual?maquina=' + idMaquina + '&pulsos=' + qtd)
                     .then(() => {
@@ -302,6 +302,7 @@ app.get('/painel', (req, res) => {
                         const pulso = dados.configuracoes?.tempo_pulso_ms || 100;
                         const pausa = dados.configuracoes?.tempo_pausa_ms || 400;
 
+                        // AQUI CONTINUA COM A BARRA INVERTIDA PORQUE RODA NO NAVEGADOR
                         const cardHtml = \`
                             <div class="card" style="margin-bottom: 0;">
                                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
@@ -326,7 +327,7 @@ app.get('/painel', (req, res) => {
                                         <div style="flex:1;"><label style="font-size:10px;">Pulso (ms)</label><input type="number" name="pulso" class="form-input" value="\${pulso}"></div>
                                         <div style="flex:1;"><label style="font-size:10px;">Pausa (ms)</label><input type="number" name="pausa" class="form-input" value="\${pausa}"></div>
                                     </div>
-                                    <button type="submit" class="btn-primary" style="padding: 8px; font-size: 12px;">💾 Guardar</button>
+                                    <button type="submit" class="btn-primary" style="padding: 8px; font-size: 12px;">💾 Salvar</button>
                                 </form>
                             </div>
                         \`;
