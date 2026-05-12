@@ -96,6 +96,15 @@ app.post('/reiniciar-maquina', async (req, res) => {
     res.redirect('/painel?aba=maquinas&status=reiniciando');
 });
 
+// NOVA ROTA PARA EXCLUIR MÁQUINAS DA NUVEM
+app.post('/deletar-maquina', async (req, res) => {
+    const maquina = req.body.maquina;
+    if(maquina) {
+        await db.ref(`Vending-Machines/${maquina}`).remove();
+    }
+    res.redirect('/painel?aba=maquinas&status=sucesso');
+});
+
 app.all('/webhook-manual', async (req, res) => {
     const maquina = req.query.maquina || "Maquina-01";
     liberarCredito(maquina, parseInt(req.query.pulsos) || 1);
@@ -302,14 +311,19 @@ app.get('/painel', (req, res) => {
                         const pulso = dados.configuracoes?.tempo_pulso_ms || 100;
                         const pausa = dados.configuracoes?.tempo_pausa_ms || 400;
 
-                        // AQUI CONTINUA COM A BARRA INVERTIDA PORQUE RODA NO NAVEGADOR
                         const cardHtml = \`
                             <div class="card" style="margin-bottom: 0;">
                                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
                                     <div>
                                         <h3 style="margin: 0; font-size: 16px; color: #111827;">🕹️ \${idDaMaquina}</h3>
                                     </div>
-                                    \${statusHtml}
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        \${statusHtml}
+                                        <form action="/deletar-maquina" method="POST" style="margin: 0;">
+                                            <input type="hidden" name="maquina" value="\${idDaMaquina}">
+                                            <button type="submit" onclick="return confirm('Tem certeza que deseja excluir a \${idDaMaquina} do sistema? O histórico será perdido.');" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 16px;" title="Excluir Máquina">🗑️</button>
+                                        </form>
+                                    </div>
                                 </div>
                                 <p style="color: var(--text-muted); font-size: 12px; margin: 0;">Último ping: \${textoPing}</p>
                                 <hr>
