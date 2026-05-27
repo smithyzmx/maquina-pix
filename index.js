@@ -403,4 +403,38 @@ app.get('/painel', (req, res) => {
                     tbody.innerHTML = ''; // Limpa a tabela
                     
                     if (ultimasVendas.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af;">Nenhum pagamento registrado ainda.</td>
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af;">Nenhum pagamento registrado ainda.</td></tr>';
+                    } else {
+                        ultimasVendas.forEach(v => {
+                            const dataFormatada = new Date(v.data).toLocaleString('pt-BR');
+                            const valorFormatado = 'R$ ' + v.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+                            const statusColor = v.status_liberacao && v.status_liberacao.includes('Bloqueado') ? '#ef4444' : '#10b981';
+                            const statusTexto = v.status_liberacao || 'Liberado';
+
+                            tbody.innerHTML += \`
+                                <tr>
+                                    <td>\${dataFormatada}</td>
+                                    <td style="font-weight: bold; color: var(--text);">\${v.maquina}</td>
+                                    <td style="color: #047857; font-weight: bold;">\${valorFormatado}</td>
+                                    <td style="color: #6b7280; font-size: 12px;">\${v.id_pagamento}</td>
+                                    <td style="color: \${statusColor}; font-weight: 500; font-size: 12px;">\${statusTexto}</td>
+                                </tr>
+                            \`;
+                        });
+                    }
+
+                    document.getElementById('faturamento-hoje').innerText = 'R$ ' + faturamentoGlobalHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+                    document.getElementById('maquinas-online-count').innerText = qtdMaquinasOnline;
+                    
+                    grafico.data.labels = Object.keys(vendasGlobalPorDia).slice(-7); 
+                    grafico.data.datasets[0].data = Object.values(vendasGlobalPorDia).slice(-7);
+                    grafico.update();
+                });
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Servidor Online com a Dashboard Responsiva pronta a rolar!"));
