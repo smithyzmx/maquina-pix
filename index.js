@@ -66,13 +66,25 @@ app.post('/webhook', async (req, res) => {
                 const pulsos = Math.floor(valor); 
                 const maquinaID = response.data.external_reference || "Maquina-01";
                 
-                liberarCredito(maquinaID, pulsos);
+                // === TRAVA DE SEGURANÇA: CONTRA ATRASO DO MERCADO PAGO ===
+                const dataPagamento = new Date(response.data.date_approved);
+                const dataAgora = new Date();
+                const diferencaEmMinutos = (dataAgora - dataPagamento) / (1000 * 60);
 
+                if (diferencaEmMinutos > 3) {
+                    console.log(`⏳ PIX muito antigo (${Math.floor(diferencaEmMinutos)} min de atraso). Guardando no histórico, mas NÃO liberando jogada.`);
+                } else {
+                    console.log("✅ PIX fresquinho e aprovado! Liberando jogada na máquina.");
+                    liberarCredito(maquinaID, pulsos);
+                }
+
+                // Sempre anota no histórico, mesmo que seja um PIX atrasado
                 db.ref(`Vending-Machines/${maquinaID}/historico_vendas`).push({
                     valor: valor,
                     data: Date.now(),
                     id_pagamento: paymentId,
-                    metodo: 'PIX'
+                    metodo: 'PIX',
+                    status_liberacao: diferencaEmMinutos > 3 ? 'Bloqueado (Atraso)' : 'Liberado'
                 });
             }
         } catch (error) {
@@ -96,7 +108,6 @@ app.post('/reiniciar-maquina', async (req, res) => {
     res.redirect('/painel?aba=maquinas&status=reiniciando');
 });
 
-// NOVA ROTA PARA EXCLUIR MÁQUINAS DA NUVEM
 app.post('/deletar-maquina', async (req, res) => {
     const maquina = req.body.maquina;
     if(maquina) {
@@ -154,6 +165,12 @@ app.get('/painel', (req, res) => {
                 .btn-primary:hover { background: #1e40af; }
                 hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
                 
+                /* Tabela Histórico */
+                .tabela-historico { width: 100%; border-collapse: collapse; font-size: 14px; }
+                .tabela-historico th { text-align: left; padding: 12px; border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: 600; }
+                .tabela-historico td { padding: 12px; border-bottom: 1px solid var(--border); }
+                .tabela-historico tr:hover { background-color: #f9fafb; }
+
                 /* MODAL */
                 .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; padding: 15px; box-sizing: border-box; }
                 .modal { background: #fff; width: 100%; max-width: 400px; border-radius: 8px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); text-align: center; }
@@ -164,9 +181,6 @@ app.get('/painel', (req, res) => {
                 .input-group input { width: 80px; padding: 12px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 18px; text-align: center; }
                 .btn-yellow { background: #fbbf24; color: #fff; border: none; padding: 12px 20px; border-radius: 4px; font-weight: bold; font-size: 14px; cursor: pointer; flex: 1; }
 
-                /* ========================================= */
-                /* AJUSTES PARA TELEMÓVEL (RESPONSIVIDADE)   */
-                /* ========================================= */
                 @media (max-width: 768px) {
                     body { flex-direction: column; overflow: visible; }
                     .sidebar { width: 100%; padding: 15px 0 0 0; border-right: none; border-bottom: 1px solid var(--border); }
@@ -179,6 +193,7 @@ app.get('/painel', (req, res) => {
                     .grid-maquinas { grid-template-columns: 1fr; gap: 15px; }
                     .card { padding: 20px; }
                     .chart-container { height: 250px; }
+                    .tabela-historico-container { overflow-x: auto; }
                 }
             </style>
         </head>
@@ -205,6 +220,24 @@ app.get('/painel', (req, res) => {
                             <h2>Faturamento <span style="font-weight: normal; color: #6b7280; font-size: 14px;">Últimos 7 dias</span></h2>
                             <div class="chart-container"><canvas id="graficoFaturamento"></canvas></div>
                         </div>
+                    </div>
+                    
+                    <div class="card tabela-historico-container">
+                        <h2>💰 Últimos Pagamentos Recebidos</h2>
+                        <table class="tabela-historico">
+                            <thead>
+                                <tr>
+                                    <th>Data e Hora</th>
+                                    <th>Máquina</th>
+                                    <th>Valor</th>
+                                    <th>ID MercadoPago</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="lista-pagamentos">
+                                <tr><td colspan="5" style="text-align:center; color: #9ca3af;">Carregando histórico...</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
 
@@ -278,6 +311,9 @@ app.get('/painel', (req, res) => {
                     let qtdMaquinasOnline = 0;
                     const vendasGlobalPorDia = {};
                     const hojeStr = new Date().toLocaleDateString('pt-BR');
+                    
+                    // Array para guardar todas as vendas e montar a tabela
+                    let todasAsVendas = [];
 
                     snap.forEach(maquinaSnap => {
                         const idDaMaquina = maquinaSnap.key; 
@@ -296,6 +332,12 @@ app.get('/painel', (req, res) => {
 
                         if (dados.historico_vendas) {
                             Object.values(dados.historico_vendas).forEach(venda => {
+                                // Adiciona na lista geral para a tabela
+                                todasAsVendas.push({
+                                    maquina: idDaMaquina,
+                                    ...venda
+                                });
+
                                 const dataVenda = new Date(venda.data);
                                 const dataStr = dataVenda.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
                                 
@@ -348,18 +390,17 @@ app.get('/painel', (req, res) => {
                         container.innerHTML += cardHtml;
                     });
 
-                    document.getElementById('faturamento-hoje').innerText = 'R$ ' + faturamentoGlobalHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
-                    document.getElementById('maquinas-online-count').innerText = qtdMaquinasOnline;
+                    // ==========================================
+                    // PREENCHER A TABELA DE HISTÓRICO
+                    // ==========================================
+                    // Ordena as vendas da mais recente para a mais antiga
+                    todasAsVendas.sort((a, b) => b.data - a.data);
                     
-                    grafico.data.labels = Object.keys(vendasGlobalPorDia).slice(-7); 
-                    grafico.data.datasets[0].data = Object.values(vendasGlobalPorDia).slice(-7);
-                    grafico.update();
-                });
-            </script>
-        </body>
-        </html>
-    `);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor Online com a Dashboard Responsiva pronta a rolar!"));
+                    // Pega as 15 últimas para não deixar a tela gigante
+                    const ultimasVendas = todasAsVendas.slice(0, 15);
+                    
+                    const tbody = document.getElementById('lista-pagamentos');
+                    tbody.innerHTML = ''; // Limpa a tabela
+                    
+                    if (ultimasVendas.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af;">Nenhum pagamento registrado ainda.</td>
