@@ -64,17 +64,38 @@ app.post('/webhook', async (req, res) => {
             if (response.data.status === 'approved') {
                 const valor = response.data.transaction_amount;
                 const pulsos = Math.floor(valor); 
-                const maquinaID = response.data.external_reference || "Maquina-01";
                 
+                // ==========================================
+                // 🕵️ O DETETIVE DE MÁQUINAS (COM POS_ID)
+                // ==========================================
+                const refExterna = response.data.external_reference || "";
+                const descricao = response.data.description || "";
+                const titulo = response.data.title || "";
+                const posId = response.data.pos_id || "";
+
+                // Função que procura a palavra exata "GRUA-" seguida de 4 letras/números
+                const extrairGrua = (texto) => {
+                    const regex = /GRUA-[A-Z0-9]{4}/i;
+                    const match = String(texto).match(regex);
+                    return match ? match[0].toUpperCase() : null;
+                };
+
+                // Vasculha os textos tentando achar o nome
+                const gruaEncontrada = extrairGrua(refExterna) || extrairGrua(descricao) || extrairGrua(titulo);
+
+                // Define a máquina: Tenta o POS_ID (Caixa), depois o detetive, e por último o padrão
+                const maquinaID = posId || gruaEncontrada || "Maquina-01";
+                // ==========================================
+
                 // === TRAVA DE SEGURANÇA: CONTRA ATRASO DO MERCADO PAGO ===
                 const dataPagamento = new Date(response.data.date_approved);
                 const dataAgora = new Date();
                 const diferencaEmMinutos = (dataAgora - dataPagamento) / (1000 * 60);
 
                 if (diferencaEmMinutos > 3) {
-                    console.log(`⏳ PIX muito antigo (${Math.floor(diferencaEmMinutos)} min de atraso). Guardando no histórico, mas NÃO liberando jogada.`);
+                    console.log(`⏳ PIX muito antigo (${Math.floor(diferencaEmMinutos)} min de atraso). Guardando no histórico, mas NÃO liberando jogada na ${maquinaID}.`);
                 } else {
-                    console.log("✅ PIX fresquinho e aprovado! Liberando jogada na máquina.");
+                    console.log(`✅ PIX fresquinho e aprovado! Liberando jogada na ${maquinaID}.`);
                     liberarCredito(maquinaID, pulsos);
                 }
 
@@ -174,267 +195,4 @@ app.get('/painel', (req, res) => {
                 /* MODAL */
                 .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; padding: 15px; box-sizing: border-box; }
                 .modal { background: #fff; width: 100%; max-width: 400px; border-radius: 8px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); text-align: center; }
-                .modal-header { background: #f3f4f6; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; border-bottom: 1px solid var(--border); }
-                .close-btn { cursor: pointer; font-size: 24px; color: #9ca3af; line-height: 1; }
-                .modal-body { padding: 30px 20px; }
-                .input-group { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
-                .input-group input { width: 80px; padding: 12px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 18px; text-align: center; }
-                .btn-yellow { background: #fbbf24; color: #fff; border: none; padding: 12px 20px; border-radius: 4px; font-weight: bold; font-size: 14px; cursor: pointer; flex: 1; }
-
-                @media (max-width: 768px) {
-                    body { flex-direction: column; overflow: visible; }
-                    .sidebar { width: 100%; padding: 15px 0 0 0; border-right: none; border-bottom: 1px solid var(--border); }
-                    .logo { text-align: center; border-bottom: none; padding-bottom: 10px; }
-                    .menu-container { margin-top: 0; display: flex; overflow-x: auto; white-space: nowrap; padding: 0 10px; -webkit-overflow-scrolling: touch; }
-                    .menu-item { padding: 12px 15px; border-left: none; border-bottom: 3px solid transparent; font-size: 14px; }
-                    .menu-item.active { border-left-color: transparent; border-bottom-color: var(--blue); }
-                    .main { padding: 15px; overflow-y: visible; }
-                    .grid-top { grid-template-columns: 1fr; gap: 15px; }
-                    .grid-maquinas { grid-template-columns: 1fr; gap: 15px; }
-                    .card { padding: 20px; }
-                    .chart-container { height: 250px; }
-                    .tabela-historico-container { overflow-x: auto; }
-                }
-            </style>
-        </head>
-        <body>
-            <aside class="sidebar">
-                <div class="logo">Gruas<span>Gravatá</span></div>
-                <div class="menu-container">
-                    <a class="menu-item ${abaAtiva === 'view-dashboard' ? 'active' : ''}" onclick="mudarAba('view-dashboard', this)">📊 Dashboard</a>
-                    <a class="menu-item ${abaAtiva === 'view-maquinas' ? 'active' : ''}" onclick="mudarAba('view-maquinas', this)">🕹️ Minhas Máquinas</a>
-                </div>
-            </aside>
-
-            <main class="main">
-                ${alertMsg ? '<div style="background: #def7ec; color: #03543f; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #bcdecb;">' + alertMsg + '</div>' : ''}
-
-                <div id="view-dashboard" class="view-section ${abaAtiva === 'view-dashboard' ? 'active' : ''}">
-                    <div class="grid-top">
-                        <div class="card">
-                            <h2>Total Diário <span style="font-weight: normal; color: #6b7280; font-size: 14px;">(Rede)</span></h2>
-                            <h1 id="faturamento-hoje" style="font-size: 32px; margin: 10px 0; color: var(--blue);">R$ 0,00</h1>
-                            <p style="color: var(--text-muted); font-size: 14px;">Máquinas Online: <span id="maquinas-online-count" style="font-weight: bold; color: #03543f;">0</span></p>
-                        </div>
-                        <div class="card">
-                            <h2>Faturamento <span style="font-weight: normal; color: #6b7280; font-size: 14px;">Últimos 7 dias</span></h2>
-                            <div class="chart-container"><canvas id="graficoFaturamento"></canvas></div>
-                        </div>
-                    </div>
-                    
-                    <div class="card tabela-historico-container">
-                        <h2>💰 Últimos Pagamentos Recebidos</h2>
-                        <table class="tabela-historico">
-                            <thead>
-                                <tr>
-                                    <th>Data e Hora</th>
-                                    <th>Máquina</th>
-                                    <th>Valor</th>
-                                    <th>ID MercadoPago</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="lista-pagamentos">
-                                <tr><td colspan="5" style="text-align:center; color: #9ca3af;">Carregando histórico...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div id="view-maquinas" class="view-section ${abaAtiva === 'view-maquinas' ? 'active' : ''}">
-                    <h2 style="font-size: 20px;">Controle de Máquinas</h2>
-                    <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">Gerencie suas gruas cadastradas.</p>
-                    
-                    <div class="grid-maquinas" id="container-maquinas">
-                        <div style="text-align: center; color: #9ca3af; width: 100%; padding: 20px;">Aguardando dados da nuvem...</div>
-                    </div>
-                </div>
-            </main>
-
-            <div id="modalCredito" class="modal-overlay">
-                <div class="modal">
-                    <div class="modal-header">
-                        <span>Crédito Remoto</span>
-                        <span class="close-btn" onclick="fecharModal()">&times;</span>
-                    </div>
-                    <div class="modal-body">
-                        <h3 id="modal-maquina-titulo" style="margin-top:0;">Incluir Crédito</h3>
-                        <input type="hidden" id="modal-maquina-id">
-                        <div class="input-group">
-                            <input type="number" id="qtdPulsos" value="1" min="1">
-                            <button class="btn-yellow" onclick="enviarCredito()" id="btn-enviar-modal">ENVIAR</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <script>
-                function mudarAba(idAba, el) {
-                    document.querySelectorAll('.view-section').forEach(e => e.classList.remove('active'));
-                    document.querySelectorAll('.menu-item').forEach(e => e.classList.remove('active'));
-                    document.getElementById(idAba).classList.add('active');
-                    el.classList.add('active');
-                }
-
-                function abrirModal(idMaquina) { 
-                    document.getElementById('modal-maquina-id').value = idMaquina;
-                    document.getElementById('modal-maquina-titulo').innerText = 'Crédito para ' + idMaquina;
-                    document.getElementById('modalCredito').style.display = 'flex'; 
-                }
-                function fecharModal() { document.getElementById('modalCredito').style.display = 'none'; }
-                
-                function enviarCredito() {
-                    const btn = document.getElementById('btn-enviar-modal');
-                    const idMaquina = document.getElementById('modal-maquina-id').value;
-                    const qtd = document.getElementById('qtdPulsos').value;
-                    btn.innerText = 'ENVIANDO...';
-                    
-                    fetch('/webhook-manual?maquina=' + idMaquina + '&pulsos=' + qtd)
-                    .then(() => {
-                        btn.innerText = 'SUCESSO!'; btn.style.background = '#10b981'; 
-                        setTimeout(() => { fecharModal(); btn.innerText = 'ENVIAR'; btn.style.background = '#fbbf24'; }, 1500);
-                    });
-                }
-
-                const firebaseConfig = { databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" };
-                firebase.initializeApp(firebaseConfig);
-                const db = firebase.database();
-
-                const ctx = document.getElementById('graficoFaturamento').getContext('2d');
-                let grafico = new Chart(ctx, { type: 'bar', data: { labels: [], datasets: [{ label: 'Faturamento (R$)', data: [], backgroundColor: '#93c5fd' }] }, options: { responsive: true, maintainAspectRatio: false }});
-
-                db.ref('/Vending-Machines').on('value', snap => {
-                    const container = document.getElementById('container-maquinas');
-                    container.innerHTML = ''; 
-                    
-                    let faturamentoGlobalHoje = 0;
-                    let qtdMaquinasOnline = 0;
-                    const vendasGlobalPorDia = {};
-                    const hojeStr = new Date().toLocaleDateString('pt-BR');
-                    
-                    // Array para guardar todas as vendas e montar a tabela
-                    let todasAsVendas = [];
-
-                    snap.forEach(maquinaSnap => {
-                        const idDaMaquina = maquinaSnap.key; 
-                        const dados = maquinaSnap.val();
-                        
-                        let statusHtml = '<span class="status-offline">OFFLINE</span>';
-                        let textoPing = '--:--';
-                        if (dados.ultimo_ping) {
-                            const diffSegundos = (Date.now() - dados.ultimo_ping) / 1000;
-                            textoPing = new Date(dados.ultimo_ping).toLocaleTimeString('pt-BR');
-                            if (diffSegundos < 120) {
-                                statusHtml = '<span class="status-online">ONLINE</span>';
-                                qtdMaquinasOnline++;
-                            }
-                        }
-
-                        if (dados.historico_vendas) {
-                            Object.values(dados.historico_vendas).forEach(venda => {
-                                // Adiciona na lista geral para a tabela
-                                todasAsVendas.push({
-                                    maquina: idDaMaquina,
-                                    ...venda
-                                });
-
-                                const dataVenda = new Date(venda.data);
-                                const dataStr = dataVenda.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-                                
-                                if(!vendasGlobalPorDia[dataStr]) vendasGlobalPorDia[dataStr] = 0;
-                                vendasGlobalPorDia[dataStr] += venda.valor;
-
-                                if (dataVenda.toLocaleDateString('pt-BR') === hojeStr) {
-                                    faturamentoGlobalHoje += venda.valor;
-                                }
-                            });
-                        }
-
-                        const pulso = dados.configuracoes?.tempo_pulso_ms || 100;
-                        const pausa = dados.configuracoes?.tempo_pausa_ms || 400;
-
-                        const cardHtml = \`
-                            <div class="card" style="margin-bottom: 0;">
-                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
-                                    <div>
-                                        <h3 style="margin: 0; font-size: 16px; color: #111827;">🕹️ \${idDaMaquina}</h3>
-                                    </div>
-                                    <div style="display: flex; gap: 10px; align-items: center;">
-                                        \${statusHtml}
-                                        <form action="/deletar-maquina" method="POST" style="margin: 0;">
-                                            <input type="hidden" name="maquina" value="\${idDaMaquina}">
-                                            <button type="submit" onclick="return confirm('Tem certeza que deseja excluir a \${idDaMaquina} do sistema? O histórico será perdido.');" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 16px;" title="Excluir Máquina">🗑️</button>
-                                        </form>
-                                    </div>
-                                </div>
-                                <p style="color: var(--text-muted); font-size: 12px; margin: 0;">Último ping: \${textoPing}</p>
-                                <hr>
-                                <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                                    <button onclick="abrirModal('\${idDaMaquina}')" style="flex: 1; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: bold; color: #374151; font-size: 12px;">🎟️ Crédito</button>
-                                    <form action="/reiniciar-maquina" method="POST" style="flex: 1; margin: 0;">
-                                        <input type="hidden" name="maquina" value="\${idDaMaquina}">
-                                        <button type="submit" onclick="return confirm('Reiniciar \${idDaMaquina}?');" style="width: 100%; padding: 10px; background: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px;">🔄 Reiniciar</button>
-                                    </form>
-                                </div>
-                                <h4 style="margin: 0 0 10px 0; color: #374151; font-size: 13px;">⚙️ Relé</h4>
-                                <form action="/salvar-config" method="POST">
-                                    <input type="hidden" name="maquina" value="\${idDaMaquina}">
-                                    <div style="display: flex; gap: 10px;">
-                                        <div style="flex:1;"><label style="font-size:10px;">Pulso (ms)</label><input type="number" name="pulso" class="form-input" value="\${pulso}"></div>
-                                        <div style="flex:1;"><label style="font-size:10px;">Pausa (ms)</label><input type="number" name="pausa" class="form-input" value="\${pausa}"></div>
-                                    </div>
-                                    <button type="submit" class="btn-primary" style="padding: 8px; font-size: 12px;">💾 Salvar</button>
-                                </form>
-                            </div>
-                        \`;
-                        container.innerHTML += cardHtml;
-                    });
-
-                    // ==========================================
-                    // PREENCHER A TABELA DE HISTÓRICO
-                    // ==========================================
-                    // Ordena as vendas da mais recente para a mais antiga
-                    todasAsVendas.sort((a, b) => b.data - a.data);
-                    
-                    // Pega as 15 últimas para não deixar a tela gigante
-                    const ultimasVendas = todasAsVendas.slice(0, 15);
-                    
-                    const tbody = document.getElementById('lista-pagamentos');
-                    tbody.innerHTML = ''; // Limpa a tabela
-                    
-                    if (ultimasVendas.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af;">Nenhum pagamento registrado ainda.</td></tr>';
-                    } else {
-                        ultimasVendas.forEach(v => {
-                            const dataFormatada = new Date(v.data).toLocaleString('pt-BR');
-                            const valorFormatado = 'R$ ' + v.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2});
-                            const statusColor = v.status_liberacao && v.status_liberacao.includes('Bloqueado') ? '#ef4444' : '#10b981';
-                            const statusTexto = v.status_liberacao || 'Liberado';
-
-                            tbody.innerHTML += \`
-                                <tr>
-                                    <td>\${dataFormatada}</td>
-                                    <td style="font-weight: bold; color: var(--text);">\${v.maquina}</td>
-                                    <td style="color: #047857; font-weight: bold;">\${valorFormatado}</td>
-                                    <td style="color: #6b7280; font-size: 12px;">\${v.id_pagamento}</td>
-                                    <td style="color: \${statusColor}; font-weight: 500; font-size: 12px;">\${statusTexto}</td>
-                                </tr>
-                            \`;
-                        });
-                    }
-
-                    document.getElementById('faturamento-hoje').innerText = 'R$ ' + faturamentoGlobalHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
-                    document.getElementById('maquinas-online-count').innerText = qtdMaquinasOnline;
-                    
-                    grafico.data.labels = Object.keys(vendasGlobalPorDia).slice(-7); 
-                    grafico.data.datasets[0].data = Object.values(vendasGlobalPorDia).slice(-7);
-                    grafico.update();
-                });
-            </script>
-        </body>
-        </html>
-    `);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor Online com a Dashboard Responsiva pronta a rolar!"));
+                .modal-header { background: #f3f4f6; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center
