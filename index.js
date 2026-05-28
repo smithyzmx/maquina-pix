@@ -66,45 +66,54 @@ app.post('/webhook', async (req, res) => {
                 const pulsos = Math.floor(valor); 
                 
                 // ==========================================
-                // 🕵️ O DETETIVE DE MÁQUINAS (COM POS_ID)
+                // 🕵️ O DETETIVE COM VÍNCULO DINÂMICO
                 // ==========================================
                 const refExterna = response.data.external_reference || "";
                 const descricao = response.data.description || "";
                 const titulo = response.data.title || "";
-                const posId = response.data.pos_id || "";
+                const posId = String(response.data.pos_id || "");
 
-                // Função que procura a palavra exata "GRUA-" seguida de 4 letras/números
+                // Função de segurança secundária
                 const extrairGrua = (texto) => {
                     const regex = /GRUA-[A-Z0-9]{4}/i;
                     const match = String(texto).match(regex);
                     return match ? match[0].toUpperCase() : null;
                 };
-
-                // Vasculha os textos tentando achar o nome
                 const gruaEncontrada = extrairGrua(refExterna) || extrairGrua(descricao) || extrairGrua(titulo);
 
-                // Define a máquina: Tenta o POS_ID (Caixa), depois o detetive, e por último o padrão
-                const maquinaID = posId || gruaEncontrada || "Maquina-01";
+                let maquinaID = "Maquina-01"; // Padrão caso tudo falhe
+
+                // MÁGICA: Vai ao Firebase consultar se o Caixa do Mercado Pago está vinculado a uma placa
+                if (posId) {
+                    const vinculoSnap = await db.ref(`Vinculos-Caixas/${posId}`).once('value');
+                    if (vinculoSnap.exists()) {
+                        maquinaID = vinculoSnap.val(); // Achou o vínculo criado pelo painel!
+                        console.log(`🔗 Vínculo encontrado: Caixa ${posId} pertence à ${maquinaID}`);
+                    } else if (gruaEncontrada) {
+                        maquinaID = gruaEncontrada; // Plano B
+                    }
+                } else if (gruaEncontrada) {
+                    maquinaID = gruaEncontrada; // Plano C
+                }
                 // ==========================================
 
-                // === TRAVA DE SEGURANÇA: CONTRA ATRASO DO MERCADO PAGO ===
                 const dataPagamento = new Date(response.data.date_approved);
                 const dataAgora = new Date();
                 const diferencaEmMinutos = (dataAgora - dataPagamento) / (1000 * 60);
 
                 if (diferencaEmMinutos > 3) {
-                    console.log(`⏳ PIX muito antigo (${Math.floor(diferencaEmMinutos)} min de atraso). Guardando no histórico, mas NÃO liberando jogada na ${maquinaID}.`);
+                    console.log(`⏳ PIX muito antigo. Guardado no histórico, mas NÃO libertando jogada na ${maquinaID}.`);
                 } else {
-                    console.log(`✅ PIX fresquinho e aprovado! Liberando jogada na ${maquinaID}.`);
+                    console.log(`✅ PIX fresquinho! Libertando jogada na ${maquinaID}.`);
                     liberarCredito(maquinaID, pulsos);
                 }
 
-                // Sempre anota no histórico, mesmo que seja um PIX atrasado
                 db.ref(`Vending-Machines/${maquinaID}/historico_vendas`).push({
                     valor: valor,
                     data: Date.now(),
                     id_pagamento: paymentId,
                     metodo: 'PIX',
+                    pos_id_recebido: posId,
                     status_liberacao: diferencaEmMinutos > 3 ? 'Bloqueado (Atraso)' : 'Liberado'
                 });
             }
@@ -114,6 +123,30 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
+// =======================================================
+// NOVAS ROTAS PARA VÍNCULOS DE CAIXAS
+// =======================================================
+app.post('/vincular-caixa', async (req, res) => {
+    const posId = req.body.pos_id;
+    const maquinaId = req.body.maquina_id;
+    
+    if(posId && maquinaId) {
+        await db.ref(`Vinculos-Caixas/${posId}`).set(maquinaId.toUpperCase());
+    }
+    res.redirect('/painel?aba=vinculos&status=sucesso');
+});
+
+app.post('/desvincular-caixa', async (req, res) => {
+    const posId = req.body.pos_id;
+    if(posId) {
+        await db.ref(`Vinculos-Caixas/${posId}`).remove();
+    }
+    res.redirect('/painel?aba=vinculos&status=sucesso');
+});
+
+// =======================================================
+// ROTAS ANTIGAS DE GESTÃO DA MÁQUINA
+// =======================================================
 app.post('/salvar-config', async (req, res) => {
     const maquina = req.body.maquina || "Maquina-01";
     await db.ref(`Vending-Machines/${maquina}/configuracoes`).update({
@@ -147,7 +180,10 @@ app.all('/webhook-manual', async (req, res) => {
 // DASHBOARD DINÂMICA (AUTO-DESCOBERTA RESPONSIVA)
 // =======================================================
 app.get('/painel', (req, res) => {
-    const abaAtiva = req.query.aba === 'maquinas' ? 'view-maquinas' : 'view-dashboard';
+    let abaAtiva = 'view-dashboard';
+    if (req.query.aba === 'maquinas') abaAtiva = 'view-maquinas';
+    if (req.query.aba === 'vinculos') abaAtiva = 'view-vinculos';
+    
     const alertMsg = req.query.status === 'sucesso' ? '✅ Ação realizada com sucesso!' : '';
 
     res.send(`
@@ -184,15 +220,14 @@ app.get('/painel', (req, res) => {
                 .form-input { width: 100%; padding: 10px; margin: 8px 0 15px; border-radius: 6px; border: 1px solid var(--border); box-sizing: border-box; background: #f9fafb; }
                 .btn-primary { background: var(--blue); color: white; padding: 10px; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; }
                 .btn-primary:hover { background: #1e40af; }
+                .btn-danger { background: #ef4444; color: white; padding: 8px 15px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
                 hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
                 
-                /* Tabela Histórico */
                 .tabela-historico { width: 100%; border-collapse: collapse; font-size: 14px; }
                 .tabela-historico th { text-align: left; padding: 12px; border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: 600; }
                 .tabela-historico td { padding: 12px; border-bottom: 1px solid var(--border); }
                 .tabela-historico tr:hover { background-color: #f9fafb; }
 
-                /* MODAL */
                 .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; padding: 15px; box-sizing: border-box; }
                 .modal { background: #fff; width: 100%; max-width: 400px; border-radius: 8px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); text-align: center; }
                 .modal-header { background: #f3f4f6; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; border-bottom: 1px solid var(--border); }
@@ -223,7 +258,8 @@ app.get('/painel', (req, res) => {
                 <div class="logo">Gruas<span>Gravatá</span></div>
                 <div class="menu-container">
                     <a class="menu-item ${abaAtiva === 'view-dashboard' ? 'active' : ''}" onclick="mudarAba('view-dashboard', this)">📊 Dashboard</a>
-                    <a class="menu-item ${abaAtiva === 'view-maquinas' ? 'active' : ''}" onclick="mudarAba('view-maquinas', this)">🕹️ Minhas Máquinas</a>
+                    <a class="menu-item ${abaAtiva === 'view-maquinas' ? 'active' : ''}" onclick="mudarAba('view-maquinas', this)">🕹️ Máquinas</a>
+                    <a class="menu-item ${abaAtiva === 'view-vinculos' ? 'active' : ''}" onclick="mudarAba('view-vinculos', this)">🔗 Vincular QR</a>
                 </div>
             </aside>
 
@@ -248,10 +284,10 @@ app.get('/painel', (req, res) => {
                         <table class="tabela-historico">
                             <thead>
                                 <tr>
-                                    <th>Data e Hora</th>
+                                    <th>Data</th>
                                     <th>Máquina</th>
                                     <th>Valor</th>
-                                    <th>ID MercadoPago</th>
+                                    <th>POS Caixa</th>
                                     <th>Status</th>
                                 </tr>
                             </thead>
@@ -264,12 +300,51 @@ app.get('/painel', (req, res) => {
 
                 <div id="view-maquinas" class="view-section ${abaAtiva === 'view-maquinas' ? 'active' : ''}">
                     <h2 style="font-size: 20px;">Controle de Máquinas</h2>
-                    <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">Gerencie suas gruas cadastradas.</p>
+                    <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">Gere a placa, relé e comandos.</p>
                     
                     <div class="grid-maquinas" id="container-maquinas">
-                        <div style="text-align: center; color: #9ca3af; width: 100%; padding: 20px;">Aguardando dados da nuvem...</div>
+                        <div style="text-align: center; color: #9ca3af; width: 100%; padding: 20px;">Aguardando dados...</div>
                     </div>
                 </div>
+
+                <div id="view-vinculos" class="view-section ${abaAtiva === 'view-vinculos' ? 'active' : ''}">
+                    <h2 style="font-size: 20px;">Vincular Caixas do Mercado Pago</h2>
+                    <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">Ensine ao sistema a qual grua pertence cada autocolante de QR Code.</p>
+                    
+                    <div class="card" style="max-width: 600px; margin-bottom: 30px;">
+                        <h3 style="margin-top:0; font-size: 16px;">Criar Novo Vínculo</h3>
+                        <form action="/vincular-caixa" method="POST" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <div style="flex: 1; min-width: 150px;">
+                                <label>Nº do Caixa (POS ID)</label>
+                                <input type="text" name="pos_id" class="form-input" placeholder="Ex: 132580780" required>
+                            </div>
+                            <div style="flex: 1; min-width: 150px;">
+                                <label>Nome da Máquina</label>
+                                <input type="text" name="maquina_id" class="form-input" placeholder="Ex: GRUA-1A2B" required>
+                            </div>
+                            <div style="width: 100%; margin-top: 5px;">
+                                <button type="submit" class="btn-primary">Vincular QR Code à Máquina</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="card tabela-historico-container">
+                        <h2>🔗 Ligações Ativas</h2>
+                        <table class="tabela-historico">
+                            <thead>
+                                <tr>
+                                    <th>Nº do Caixa (Mercado Pago)</th>
+                                    <th>Máquina Destino (Firebase)</th>
+                                    <th>Ação</th>
+                                </tr>
+                            </thead>
+                            <tbody id="lista-vinculos">
+                                <tr><td colspan="3" style="text-align:center; color: #9ca3af;">Aguardando dados da nuvem...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
             </main>
 
             <div id="modalCredito" class="modal-overlay">
@@ -324,6 +399,7 @@ app.get('/painel', (req, res) => {
                 const ctx = document.getElementById('graficoFaturamento').getContext('2d');
                 let grafico = new Chart(ctx, { type: 'bar', data: { labels: [], datasets: [{ label: 'Faturamento (R$)', data: [], backgroundColor: '#93c5fd' }] }, options: { responsive: true, maintainAspectRatio: false }});
 
+                // Lógica de Leitura das Máquinas e Dashboard
                 db.ref('/Vending-Machines').on('value', snap => {
                     const container = document.getElementById('container-maquinas');
                     container.innerHTML = ''; 
@@ -332,8 +408,6 @@ app.get('/painel', (req, res) => {
                     let qtdMaquinasOnline = 0;
                     const vendasGlobalPorDia = {};
                     const hojeStr = new Date().toLocaleDateString('pt-BR');
-                    
-                    // Array para guardar todas as vendas e montar a tabela
                     let todasAsVendas = [];
 
                     snap.forEach(maquinaSnap => {
@@ -353,11 +427,7 @@ app.get('/painel', (req, res) => {
 
                         if (dados.historico_vendas) {
                             Object.values(dados.historico_vendas).forEach(venda => {
-                                // Adiciona na lista geral para a tabela
-                                todasAsVendas.push({
-                                    maquina: idDaMaquina,
-                                    ...venda
-                                });
+                                todasAsVendas.push({ maquina: idDaMaquina, ...venda });
 
                                 const dataVenda = new Date(venda.data);
                                 const dataStr = dataVenda.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
@@ -377,14 +447,12 @@ app.get('/painel', (req, res) => {
                         const cardHtml = \`
                             <div class="card" style="margin-bottom: 0;">
                                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
-                                    <div>
-                                        <h3 style="margin: 0; font-size: 16px; color: #111827;">🕹️ \${idDaMaquina}</h3>
-                                    </div>
+                                    <div><h3 style="margin: 0; font-size: 16px; color: #111827;">🕹️ \${idDaMaquina}</h3></div>
                                     <div style="display: flex; gap: 10px; align-items: center;">
                                         \${statusHtml}
                                         <form action="/deletar-maquina" method="POST" style="margin: 0;">
                                             <input type="hidden" name="maquina" value="\${idDaMaquina}">
-                                            <button type="submit" onclick="return confirm('Tem certeza que deseja excluir a \${idDaMaquina} do sistema? O histórico será perdido.');" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 16px;" title="Excluir Máquina">🗑️</button>
+                                            <button type="submit" onclick="return confirm('Tem certeza?');" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 16px;">🗑️</button>
                                         </form>
                                     </div>
                                 </div>
@@ -401,8 +469,8 @@ app.get('/painel', (req, res) => {
                                 <form action="/salvar-config" method="POST">
                                     <input type="hidden" name="maquina" value="\${idDaMaquina}">
                                     <div style="display: flex; gap: 10px;">
-                                        <div style="flex:1;"><label style="font-size:10px;">Pulso (ms)</label><input type="number" name="pulso" class="form-input" value="\${pulso}"></div>
-                                        <div style="flex:1;"><label style="font-size:10px;">Pausa (ms)</label><input type="number" name="pausa" class="form-input" value="\${pausa}"></div>
+                                        <div style="flex:1;"><label style="font-size:10px;">Pulso</label><input type="number" name="pulso" class="form-input" value="\${pulso}"></div>
+                                        <div style="flex:1;"><label style="font-size:10px;">Pausa</label><input type="number" name="pausa" class="form-input" value="\${pausa}"></div>
                                     </div>
                                     <button type="submit" class="btn-primary" style="padding: 8px; font-size: 12px;">💾 Salvar</button>
                                 </form>
@@ -411,34 +479,26 @@ app.get('/painel', (req, res) => {
                         container.innerHTML += cardHtml;
                     });
 
-                    // ==========================================
-                    // PREENCHER A TABELA DE HISTÓRICO
-                    // ==========================================
-                    // Ordena as vendas da mais recente para a mais antiga
                     todasAsVendas.sort((a, b) => b.data - a.data);
-                    
-                    // Pega as 15 últimas para não deixar a tela gigante
                     const ultimasVendas = todasAsVendas.slice(0, 15);
-                    
                     const tbody = document.getElementById('lista-pagamentos');
-                    tbody.innerHTML = ''; // Limpa a tabela
+                    tbody.innerHTML = ''; 
                     
                     if (ultimasVendas.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af;">Nenhum pagamento registrado ainda.</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af;">Sem pagamentos.</td></tr>';
                     } else {
                         ultimasVendas.forEach(v => {
                             const dataFormatada = new Date(v.data).toLocaleString('pt-BR');
                             const valorFormatado = 'R$ ' + v.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2});
-                            const statusColor = v.status_liberacao && v.status_liberacao.includes('Bloqueado') ? '#ef4444' : '#10b981';
-                            const statusTexto = v.status_liberacao || 'Liberado';
-
+                            const posAviso = v.pos_id_recebido ? v.pos_id_recebido : '---';
+                            
                             tbody.innerHTML += \`
                                 <tr>
                                     <td>\${dataFormatada}</td>
-                                    <td style="font-weight: bold; color: var(--text);">\${v.maquina}</td>
+                                    <td style="font-weight: bold;">\${v.maquina}</td>
                                     <td style="color: #047857; font-weight: bold;">\${valorFormatado}</td>
-                                    <td style="color: #6b7280; font-size: 12px;">\${v.id_pagamento}</td>
-                                    <td style="color: \${statusColor}; font-weight: 500; font-size: 12px;">\${statusTexto}</td>
+                                    <td style="color: #6b7280; font-size: 12px;">\${posAviso}</td>
+                                    <td style="color: #10b981; font-size: 12px;">\${v.status_liberacao || 'Liberado'}</td>
                                 </tr>
                             \`;
                         });
@@ -451,11 +511,24 @@ app.get('/painel', (req, res) => {
                     grafico.data.datasets[0].data = Object.values(vendasGlobalPorDia).slice(-7);
                     grafico.update();
                 });
-            </script>
-        </body>
-        </html>
-    `);
-});
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor Online com a Dashboard Responsiva pronta a rolar!"));
+                // Lógica de Leitura dos Vínculos de Caixa
+                db.ref('/Vinculos-Caixas').on('value', snap => {
+                    const tbodyVinculos = document.getElementById('lista-vinculos');
+                    tbodyVinculos.innerHTML = '';
+                    
+                    if (!snap.exists()) {
+                        tbodyVinculos.innerHTML = '<tr><td colspan="3" style="text-align:center; color: #9ca3af;">Nenhum vínculo registado.</td></tr>';
+                    } else {
+                        snap.forEach(vinculo => {
+                            const posId = vinculo.key;
+                            const maquinaId = vinculo.val();
+                            
+                            tbodyVinculos.innerHTML += \`
+                                <tr>
+                                    <td style="font-weight: bold; color: #111827;">\${posId}</td>
+                                    <td style="font-weight: bold; color: var(--blue);">\${maquinaId}</td>
+                                    <td>
+                                        <form action="/desvincular-caixa" method="POST" style="margin: 0;">
+                                            <input type="hidden" name="pos_id" value="\${posId}">
+                                            <button type="submit" class="btn-danger" onclick="return confirm
