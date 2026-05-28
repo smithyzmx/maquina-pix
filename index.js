@@ -531,4 +531,19 @@ app.get('/painel', (req, res) => {
                                     <td>
                                         <form action="/desvincular-caixa" method="POST" style="margin: 0;">
                                             <input type="hidden" name="pos_id" value="\${posId}">
-                                            <button type="submit" class="btn-danger" onclick="return confirm
+                                            <button type="submit" class="btn-danger" onclick="return confirm('Desvincular o Caixa \${posId}?');">Desvincular</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            \`;
+                        });
+                    }
+                });
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Servidor Online com Vínculo de Caixas pronto!"));
