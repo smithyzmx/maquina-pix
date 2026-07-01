@@ -76,27 +76,23 @@ app.post('/webhook', async (req, res) => {
                 const gruaEncontrada = extrairGrua(refExterna) || extrairGrua(descricao) || extrairGrua(titulo);
                 let maquinaID = "Maquina-01"; 
 
-                if (posId) {
+                if (gruaEncontrada) {
+                    maquinaID = gruaEncontrada; 
+                } else if (posId) {
                     const vinculoSnap = await db.ref(`Vinculos-Caixas/${posId}`).once('value');
                     if (vinculoSnap.exists()) {
                         maquinaID = vinculoSnap.val();
-                    } else if (gruaEncontrada) {
-                        maquinaID = gruaEncontrada; 
                     }
-                } else if (gruaEncontrada) {
-                    maquinaID = gruaEncontrada; 
                 }
 
                 const dataPagamento = new Date(response.data.date_approved);
                 const dataAgora = new Date();
                 const diferencaEmMinutos = (dataAgora - dataPagamento) / (1000 * 60);
 
-                // === LÓGICA DE BÔNUS ===
                 let pulsosFinais = pulsosBase;
                 if (diferencaEmMinutos > 3) {
                     console.log(`⏳ Pagamento antigo. Guardado, NÃO libertando na ${maquinaID}.`);
                 } else {
-                    // Busca as configurações dessa máquina específica para calcular o bônus
                     const configSnap = await db.ref(`Vending-Machines/${maquinaID}/configuracoes`).once('value');
                     const conf = configSnap.val() || {};
                     const bonusValor = parseFloat(conf.bonus_valor) || 0;
@@ -128,7 +124,7 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ==========================================
-// ROTAS PARA VÍNCULOS E COBRANÇAS
+// ROTAS PARA VÍNCULOS (PIX / POINT VIA POS ID)
 // ==========================================
 app.post('/vincular-caixa', async (req, res) => {
     const posId = req.body.pos_id;
@@ -140,40 +136,6 @@ app.post('/vincular-caixa', async (req, res) => {
 app.post('/desvincular-caixa', async (req, res) => {
     if(req.body.pos_id) await db.ref(`Vinculos-Caixas/${req.body.pos_id}`).remove();
     res.redirect('/painel?aba=vinculos&status=sucesso');
-});
-
-app.post('/vincular-maquininha', async (req, res) => {
-    const deviceId = req.body.device_id;
-    const maquinaId = req.body.maquina_id;
-    if(deviceId && maquinaId) await db.ref(`Vinculos-Maquininhas/${maquinaId.toUpperCase()}`).set(deviceId);
-    res.redirect('/painel?aba=point&status=sucesso');
-});
-
-app.post('/desvincular-maquininha', async (req, res) => {
-    if(req.body.maquina_id) await db.ref(`Vinculos-Maquininhas/${req.body.maquina_id}`).remove();
-    res.redirect('/painel?aba=point&status=sucesso');
-});
-
-app.post('/cobrar-cartao', async (req, res) => {
-    const maquinaId = req.body.maquina_id;
-    const valor = parseFloat(req.body.valor) || 2.00;
-
-    try {
-        const snap = await db.ref(`Vinculos-Maquininhas/${maquinaId}`).once('value');
-        if (!snap.exists()) return res.redirect('/painel?aba=maquinas&status=erro_sem_maquininha');
-        
-        const deviceId = snap.val();
-        await axios.post(`https://api.mercadopago.com/point/integration-api/devices/${deviceId}/payment-intents`, {
-            amount: valor,
-            description: "Ficha Pelucia",
-            additional_info: { external_reference: maquinaId }
-        }, { headers: { 'Authorization': `Bearer ${process.env.MP_TOKEN}` } });
-
-        res.redirect('/painel?aba=maquinas&status=cobranca_enviada');
-    } catch (error) {
-        console.error("Erro ao cobrar na Point:", error.response ? error.response.data : error.message);
-        res.redirect('/painel?aba=maquinas&status=erro_point');
-    }
 });
 
 // ==========================================
@@ -214,9 +176,7 @@ app.get('/painel', (req, res) => {
     
     let alertMsg = '';
     if (req.query.status === 'sucesso') alertMsg = '✅ Ação realizada com sucesso!';
-    if (req.query.status === 'cobranca_enviada') alertMsg = '💳 Ordem enviada! Aproxime o cartão na máquina.';
-    if (req.query.status === 'erro_sem_maquininha') alertMsg = '⚠️ Nenhuma Point vinculada a esta grua.';
-    if (req.query.status === 'erro_point') alertMsg = '❌ Erro de comunicação com o Mercado Pago.';
+    if (req.query.status === 'reiniciando') alertMsg = '🔄 Comando de reinício enviado para a placa!';
 
     res.send(`
         <!DOCTYPE html>
@@ -253,8 +213,6 @@ app.get('/painel', (req, res) => {
                 .btn-primary { background: var(--blue); color: white; padding: 10px; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; }
                 .btn-primary:hover { background: #1e40af; }
                 .btn-danger { background: #ef4444; color: white; padding: 8px 15px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
-                .btn-point { background: #009ee3; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 5px;}
-                .btn-point:hover { background: #0087c1; }
                 hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
                 .tabela-historico { width: 100%; border-collapse: collapse; font-size: 14px; }
                 .tabela-historico th { text-align: left; padding: 12px; border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: 600; }
@@ -290,8 +248,7 @@ app.get('/painel', (req, res) => {
                 <div class="menu-container">
                     <a class="menu-item ${abaAtiva === 'view-dashboard' ? 'active' : ''}" onclick="mudarAba('view-dashboard', this)">📊 Dashboard</a>
                     <a class="menu-item ${abaAtiva === 'view-maquinas' ? 'active' : ''}" onclick="mudarAba('view-maquinas', this)">🕹️ Máquinas</a>
-                    <a class="menu-item ${abaAtiva === 'view-vinculos' ? 'active' : ''}" onclick="mudarAba('view-vinculos', this)">🔗 Vincular PIX</a>
-                    <a class="menu-item ${abaAtiva === 'view-point' ? 'active' : ''}" onclick="mudarAba('view-point', this)">💳 Vincular Cartão</a>
+                    <a class="menu-item ${abaAtiva === 'view-vinculos' ? 'active' : ''}" onclick="mudarAba('view-vinculos', this)">🔗 Vincular Caixas</a>
                 </div>
             </aside>
 
@@ -322,45 +279,27 @@ app.get('/painel', (req, res) => {
 
                 <div id="view-maquinas" class="view-section ${abaAtiva === 'view-maquinas' ? 'active' : ''}">
                     <h2 style="font-size: 20px;">Controle de Máquinas</h2>
-                    <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">Gere a placa, promoções, e os pagamentos por aproximação.</p>
+                    <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">Gere a placa, promoções e testes remotos.</p>
                     <div class="grid-maquinas" id="container-maquinas">
                         <div style="text-align: center; color: #9ca3af; width: 100%; padding: 20px;">Aguardando dados...</div>
                     </div>
                 </div>
 
                 <div id="view-vinculos" class="view-section ${abaAtiva === 'view-vinculos' ? 'active' : ''}">
-                    <h2 style="font-size: 20px;">Vincular Caixas PIX (QR Code Fixo)</h2>
+                    <h2 style="font-size: 20px;">Vincular Caixas (PIX e Point Físico)</h2>
+                    <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 20px;">Use o Nº do Caixa (POS ID) para vincular tanto o QR Code de papel quanto a sua maquininha física do Mercado Pago a uma grua.</p>
                     <div class="card" style="max-width: 600px; margin-bottom: 30px;">
                         <form action="/vincular-caixa" method="POST" style="display: flex; gap: 10px; flex-wrap: wrap;">
                             <div style="flex: 1; min-width: 150px;"><label>Nº do Caixa (POS ID)</label><input type="text" name="pos_id" class="form-input" required></div>
                             <div style="flex: 1; min-width: 150px;"><label>Máquina Destino</label><input type="text" name="maquina_id" class="form-input" placeholder="Ex: GRUA-1234" required></div>
-                            <div style="width: 100%; margin-top: 5px;"><button type="submit" class="btn-primary">Vincular QR Code</button></div>
+                            <div style="width: 100%; margin-top: 5px;"><button type="submit" class="btn-primary">Criar Vínculo</button></div>
                         </form>
                     </div>
                     <div class="card tabela-historico-container">
-                        <h2>🔗 Ligações PIX Ativas</h2>
+                        <h2>🔗 Ligações Ativas</h2>
                         <table class="tabela-historico">
-                            <thead><tr><th>Nº do Caixa</th><th>Máquina Destino</th><th>Ação</th></tr></thead>
+                            <thead><tr><th>Nº do Caixa (POS ID)</th><th>Máquina Destino</th><th>Ação</th></tr></thead>
                             <tbody id="lista-vinculos"><tr><td colspan="3" style="text-align:center;">Aguardando...</td></tr></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div id="view-point" class="view-section ${abaAtiva === 'view-point' ? 'active' : ''}">
-                    <h2 style="font-size: 20px;">Vincular Máquina Point (Cartão)</h2>
-                    <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 20px;">Encontre o Device ID (Número de Série) atrás da sua maquininha.</p>
-                    <div class="card" style="max-width: 600px; margin-bottom: 30px;">
-                        <form action="/vincular-maquininha" method="POST" style="display: flex; gap: 10px; flex-wrap: wrap;">
-                            <div style="flex: 1; min-width: 150px;"><label>Device ID (Point)</label><input type="text" name="device_id" class="form-input" placeholder="Ex: PAX_A910_12345" required></div>
-                            <div style="flex: 1; min-width: 150px;"><label>Máquina Destino</label><input type="text" name="maquina_id" class="form-input" placeholder="Ex: GRUA-1234" required></div>
-                            <div style="width: 100%; margin-top: 5px;"><button type="submit" class="btn-point">Vincular Point à Grua</button></div>
-                        </form>
-                    </div>
-                    <div class="card tabela-historico-container">
-                        <h2>💳 Máquinas de Cartão Ativas</h2>
-                        <table class="tabela-historico">
-                            <thead><tr><th>Máquina Destino (Grua)</th><th>Device ID (Point)</th><th>Ação</th></tr></thead>
-                            <tbody id="lista-points"><tr><td colspan="3" style="text-align:center;">Aguardando...</td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -471,7 +410,7 @@ app.get('/painel', (req, res) => {
                                     <div><h3 style="margin: 0; font-size: 16px; color: #111827;">🕹️ \${idDaMaquina}</h3></div>
                                     <div style="display: flex; gap: 10px; align-items: center;">
                                         \${statusHtml}
-                                        <form action="/deletar-maquina" method="POST" style="margin: 0;"><input type="hidden" name="maquina" value="\${idDaMaquina}"><button type="submit" onclick="return confirm('Tem certeza?');" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 16px;">🗑️</button></form>
+                                        <form action="/deletar-maquina" method="POST" style="margin: 0;"><input type="hidden" name="maquina" value="\${idDaMaquina}"><button type="submit" onclick="return confirm('Tem certeza? A máquina será removida da lista.');" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 16px;">🗑️</button></form>
                                     </div>
                                 </div>
                                 <p style="color: var(--text-muted); font-size: 12px; margin: 0;">Último ping: \${textoPing}</p>
@@ -483,13 +422,8 @@ app.get('/painel', (req, res) => {
 
                                 <hr style="margin: 15px 0;">
                                 
-                                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                                    <form action="/cobrar-cartao" method="POST" style="flex: 1; margin: 0;">
-                                        <input type="hidden" name="maquina_id" value="\${idDaMaquina}">
-                                        <input type="hidden" name="valor" value="2.00">
-                                        <button type="submit" style="width: 100%; padding: 10px; background: #009ee3; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px;">💳 Acordar Point</button>
-                                    </form>
-                                    <button onclick="abrirModal('\${idDaMaquina}')" style="flex: 1; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: bold; color: #374151; font-size: 12px;">🎟️ Ficha Grátis</button>
+                                <div style="display: flex; margin-bottom: 15px;">
+                                    <button onclick="abrirModal('\${idDaMaquina}')" style="width: 100%; padding: 12px; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: bold; color: #374151; font-size: 14px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">🎟️ Enviar Ficha Grátis</button>
                                 </div>
 
                                 <h4 style="margin: 0 0 10px 0; color: #374151; font-size: 13px;">⚙️ Hardware e Promoções</h4>
@@ -549,19 +483,10 @@ app.get('/painel', (req, res) => {
 
                 db.ref('/Vinculos-Caixas').on('value', snap => {
                     const tbody = document.getElementById('lista-vinculos'); tbody.innerHTML = '';
-                    if (!snap.exists()) tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">Nenhum vínculo PIX.</td></tr>';
+                    if (!snap.exists()) tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">Nenhum vínculo.</td></tr>';
                     else snap.forEach(v => {
                         tbody.innerHTML += \`<tr><td style="font-weight:bold;">\${v.key}</td><td style="font-weight:bold; color:var(--blue);">\${v.val()}</td>
                         <td><form action="/desvincular-caixa" method="POST" style="margin:0;"><input type="hidden" name="pos_id" value="\${v.key}"><button type="submit" class="btn-danger">Desvincular</button></form></td></tr>\`;
-                    });
-                });
-
-                db.ref('/Vinculos-Maquininhas').on('value', snap => {
-                    const tbody = document.getElementById('lista-points'); tbody.innerHTML = '';
-                    if (!snap.exists()) tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">Nenhuma máquina Point vinculada.</td></tr>';
-                    else snap.forEach(v => {
-                        tbody.innerHTML += \`<tr><td style="font-weight:bold; color:var(--blue);">\${v.key}</td><td style="font-weight:bold;">\${v.val()}</td>
-                        <td><form action="/desvincular-maquininha" method="POST" style="margin:0;"><input type="hidden" name="maquina_id" value="\${v.key}"><button type="submit" class="btn-danger">Desvincular</button></form></td></tr>\`;
                     });
                 });
             </script>
@@ -571,4 +496,4 @@ app.get('/painel', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor Online com Integração de Bônus!"));
+app.listen(PORT, () => console.log("Servidor Online - Dashboard Otimizada!"));
