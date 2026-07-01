@@ -60,7 +60,7 @@ app.post('/webhook', async (req, res) => {
             
             if (response.data.status === 'approved') {
                 const valor = response.data.transaction_amount;
-                const pulsos = Math.floor(valor); 
+                let pulsosBase = Math.floor(valor); 
                 
                 const refExterna = response.data.external_reference || "";
                 const descricao = response.data.description || "";
@@ -72,8 +72,8 @@ app.post('/webhook', async (req, res) => {
                     const match = String(texto).match(regex);
                     return match ? match[0].toUpperCase() : null;
                 };
+                
                 const gruaEncontrada = extrairGrua(refExterna) || extrairGrua(descricao) || extrairGrua(titulo);
-
                 let maquinaID = "Maquina-01"; 
 
                 if (posId) {
@@ -91,19 +91,34 @@ app.post('/webhook', async (req, res) => {
                 const dataAgora = new Date();
                 const diferencaEmMinutos = (dataAgora - dataPagamento) / (1000 * 60);
 
+                // === LÓGICA DE BÔNUS ===
+                let pulsosFinais = pulsosBase;
                 if (diferencaEmMinutos > 3) {
-                    console.log(`⏳ PIX atrasado. Guardado no histórico, NÃO libertando jogada na ${maquinaID}.`);
+                    console.log(`⏳ Pagamento antigo. Guardado, NÃO libertando na ${maquinaID}.`);
                 } else {
-                    liberarCredito(maquinaID, pulsos);
+                    // Busca as configurações dessa máquina específica para calcular o bônus
+                    const configSnap = await db.ref(`Vending-Machines/${maquinaID}/configuracoes`).once('value');
+                    const conf = configSnap.val() || {};
+                    const bonusValor = parseFloat(conf.bonus_valor) || 0;
+                    const bonusPulsos = parseInt(conf.bonus_pulsos) || 0;
+
+                    if (bonusValor > 0 && valor >= bonusValor) {
+                        const multiplicador = Math.floor(valor / bonusValor);
+                        const pulsosExtra = multiplicador * bonusPulsos;
+                        pulsosFinais += pulsosExtra;
+                        console.log(`🎁 BÔNUS APLICADO: +${pulsosExtra} jogadas grátis para ${maquinaID}!`);
+                    }
+
+                    liberarCredito(maquinaID, pulsosFinais);
                 }
 
                 db.ref(`Vending-Machines/${maquinaID}/historico_vendas`).push({
                     valor: valor,
                     data: Date.now(),
                     id_pagamento: paymentId,
-                    metodo: 'PIX',
+                    metodo: response.data.payment_type_id === 'account_money' ? 'PIX/SALDO' : 'CARTÃO',
                     pos_id_recebido: posId,
-                    status_liberacao: diferencaEmMinutos > 3 ? 'Bloqueado (Atraso)' : 'Liberado'
+                    status_liberacao: diferencaEmMinutos > 3 ? 'Bloqueado' : 'Liberado'
                 });
             }
         } catch (error) {
@@ -112,6 +127,9 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
+// ==========================================
+// ROTAS PARA VÍNCULOS E COBRANÇAS
+// ==========================================
 app.post('/vincular-caixa', async (req, res) => {
     const posId = req.body.pos_id;
     const maquinaId = req.body.maquina_id;
@@ -120,51 +138,92 @@ app.post('/vincular-caixa', async (req, res) => {
 });
 
 app.post('/desvincular-caixa', async (req, res) => {
-    const posId = req.body.pos_id;
-    if(posId) await db.ref(`Vinculos-Caixas/${posId}`).remove();
+    if(req.body.pos_id) await db.ref(`Vinculos-Caixas/${req.body.pos_id}`).remove();
     res.redirect('/painel?aba=vinculos&status=sucesso');
 });
 
+app.post('/vincular-maquininha', async (req, res) => {
+    const deviceId = req.body.device_id;
+    const maquinaId = req.body.maquina_id;
+    if(deviceId && maquinaId) await db.ref(`Vinculos-Maquininhas/${maquinaId.toUpperCase()}`).set(deviceId);
+    res.redirect('/painel?aba=point&status=sucesso');
+});
+
+app.post('/desvincular-maquininha', async (req, res) => {
+    if(req.body.maquina_id) await db.ref(`Vinculos-Maquininhas/${req.body.maquina_id}`).remove();
+    res.redirect('/painel?aba=point&status=sucesso');
+});
+
+app.post('/cobrar-cartao', async (req, res) => {
+    const maquinaId = req.body.maquina_id;
+    const valor = parseFloat(req.body.valor) || 2.00;
+
+    try {
+        const snap = await db.ref(`Vinculos-Maquininhas/${maquinaId}`).once('value');
+        if (!snap.exists()) return res.redirect('/painel?aba=maquinas&status=erro_sem_maquininha');
+        
+        const deviceId = snap.val();
+        await axios.post(`https://api.mercadopago.com/point/integration-api/devices/${deviceId}/payment-intents`, {
+            amount: valor,
+            description: "Ficha Pelucia",
+            additional_info: { external_reference: maquinaId }
+        }, { headers: { 'Authorization': `Bearer ${process.env.MP_TOKEN}` } });
+
+        res.redirect('/painel?aba=maquinas&status=cobranca_enviada');
+    } catch (error) {
+        console.error("Erro ao cobrar na Point:", error.response ? error.response.data : error.message);
+        res.redirect('/painel?aba=maquinas&status=erro_point');
+    }
+});
+
+// ==========================================
+// GESTÃO DA PLACA E HARDWARE
+// ==========================================
 app.post('/salvar-config', async (req, res) => {
     const maquina = req.body.maquina || "Maquina-01";
     await db.ref(`Vending-Machines/${maquina}/configuracoes`).update({
         "tempo_pulso_ms": parseInt(req.body.pulso) || 100,
-        "tempo_pausa_ms": parseInt(req.body.pausa) || 400
+        "tempo_pausa_ms": parseInt(req.body.pausa) || 400,
+        "bonus_valor": parseFloat(req.body.bonus_valor) || 0,
+        "bonus_pulsos": parseInt(req.body.bonus_pulsos) || 0
     });
     res.redirect('/painel?aba=maquinas&status=sucesso');
 });
 
 app.post('/reiniciar-maquina', async (req, res) => {
-    const maquina = req.body.maquina || "Maquina-01";
-    await db.ref(`Vending-Machines/${maquina}`).update({ "comando": "REINICIAR" });
+    await db.ref(`Vending-Machines/${req.body.maquina}`).update({ "comando": "REINICIAR" });
     res.redirect('/painel?aba=maquinas&status=reiniciando');
 });
 
 app.post('/deletar-maquina', async (req, res) => {
-    const maquina = req.body.maquina;
-    if(maquina) await db.ref(`Vending-Machines/${maquina}`).remove();
+    if(req.body.maquina) await db.ref(`Vending-Machines/${req.body.maquina}`).remove();
     res.redirect('/painel?aba=maquinas&status=sucesso');
 });
 
 app.all('/webhook-manual', async (req, res) => {
-    const maquina = req.query.maquina || "Maquina-01";
-    liberarCredito(maquina, parseInt(req.query.pulsos) || 1);
+    liberarCredito(req.query.maquina || "Maquina-01", parseInt(req.query.pulsos) || 1);
     res.send("OK");
 });
 
+// ==========================================
+// DASHBOARD
+// ==========================================
 app.get('/painel', (req, res) => {
     let abaAtiva = 'view-dashboard';
-    if (req.query.aba === 'maquinas') abaAtiva = 'view-maquinas';
-    if (req.query.aba === 'vinculos') abaAtiva = 'view-vinculos';
+    if (req.query.aba) abaAtiva = `view-${req.query.aba}`;
     
-    const alertMsg = req.query.status === 'sucesso' ? '✅ Ação realizada com sucesso!' : '';
+    let alertMsg = '';
+    if (req.query.status === 'sucesso') alertMsg = '✅ Ação realizada com sucesso!';
+    if (req.query.status === 'cobranca_enviada') alertMsg = '💳 Ordem enviada! Aproxime o cartão na máquina.';
+    if (req.query.status === 'erro_sem_maquininha') alertMsg = '⚠️ Nenhuma Point vinculada a esta grua.';
+    if (req.query.status === 'erro_point') alertMsg = '❌ Erro de comunicação com o Mercado Pago.';
 
     res.send(`
         <!DOCTYPE html>
         <html lang="pt-BR">
         <head>
             <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Painel - Controle de Gruas</title>
             <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
             <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
@@ -194,6 +253,8 @@ app.get('/painel', (req, res) => {
                 .btn-primary { background: var(--blue); color: white; padding: 10px; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; }
                 .btn-primary:hover { background: #1e40af; }
                 .btn-danger { background: #ef4444; color: white; padding: 8px 15px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+                .btn-point { background: #009ee3; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 5px;}
+                .btn-point:hover { background: #0087c1; }
                 hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
                 .tabela-historico { width: 100%; border-collapse: collapse; font-size: 14px; }
                 .tabela-historico th { text-align: left; padding: 12px; border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: 600; }
@@ -229,7 +290,8 @@ app.get('/painel', (req, res) => {
                 <div class="menu-container">
                     <a class="menu-item ${abaAtiva === 'view-dashboard' ? 'active' : ''}" onclick="mudarAba('view-dashboard', this)">📊 Dashboard</a>
                     <a class="menu-item ${abaAtiva === 'view-maquinas' ? 'active' : ''}" onclick="mudarAba('view-maquinas', this)">🕹️ Máquinas</a>
-                    <a class="menu-item ${abaAtiva === 'view-vinculos' ? 'active' : ''}" onclick="mudarAba('view-vinculos', this)">🔗 Vincular QR</a>
+                    <a class="menu-item ${abaAtiva === 'view-vinculos' ? 'active' : ''}" onclick="mudarAba('view-vinculos', this)">🔗 Vincular PIX</a>
+                    <a class="menu-item ${abaAtiva === 'view-point' ? 'active' : ''}" onclick="mudarAba('view-point', this)">💳 Vincular Cartão</a>
                 </div>
             </aside>
 
@@ -252,48 +314,53 @@ app.get('/painel', (req, res) => {
                     <div class="card tabela-historico-container">
                         <h2>💰 Últimos Pagamentos Recebidos</h2>
                         <table class="tabela-historico">
-                            <thead>
-                                <tr>
-                                    <th>Data</th>
-                                    <th>Máquina</th>
-                                    <th>Valor</th>
-                                    <th>POS Caixa</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="lista-pagamentos">
-                                <tr><td colspan="5" style="text-align:center; color: #9ca3af;">Carregando...</td></tr>
-                            </tbody>
+                            <thead><tr><th>Data</th><th>Máquina</th><th>Valor</th><th>Método</th><th>Status</th></tr></thead>
+                            <tbody id="lista-pagamentos"><tr><td colspan="5" style="text-align:center;">Carregando...</td></tr></tbody>
                         </table>
                     </div>
                 </div>
 
                 <div id="view-maquinas" class="view-section ${abaAtiva === 'view-maquinas' ? 'active' : ''}">
                     <h2 style="font-size: 20px;">Controle de Máquinas</h2>
-                    <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">Gere a placa, relé, Wi-Fi e comandos.</p>
+                    <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">Gere a placa, promoções, e os pagamentos por aproximação.</p>
                     <div class="grid-maquinas" id="container-maquinas">
                         <div style="text-align: center; color: #9ca3af; width: 100%; padding: 20px;">Aguardando dados...</div>
                     </div>
                 </div>
 
                 <div id="view-vinculos" class="view-section ${abaAtiva === 'view-vinculos' ? 'active' : ''}">
-                    <h2 style="font-size: 20px;">Vincular Caixas do Mercado Pago</h2>
-                    <p style="color: var(--text-muted); margin-bottom: 20px; font-size: 14px;">Ensine ao sistema a qual grua pertence cada QR Code.</p>
-                    
+                    <h2 style="font-size: 20px;">Vincular Caixas PIX (QR Code Fixo)</h2>
                     <div class="card" style="max-width: 600px; margin-bottom: 30px;">
-                        <h3 style="margin-top:0; font-size: 16px;">Criar Novo Vínculo</h3>
                         <form action="/vincular-caixa" method="POST" style="display: flex; gap: 10px; flex-wrap: wrap;">
                             <div style="flex: 1; min-width: 150px;"><label>Nº do Caixa (POS ID)</label><input type="text" name="pos_id" class="form-input" required></div>
-                            <div style="flex: 1; min-width: 150px;"><label>Nome da Máquina</label><input type="text" name="maquina_id" class="form-input" required></div>
+                            <div style="flex: 1; min-width: 150px;"><label>Máquina Destino</label><input type="text" name="maquina_id" class="form-input" placeholder="Ex: GRUA-1234" required></div>
                             <div style="width: 100%; margin-top: 5px;"><button type="submit" class="btn-primary">Vincular QR Code</button></div>
                         </form>
                     </div>
-
                     <div class="card tabela-historico-container">
-                        <h2>🔗 Ligações Ativas</h2>
+                        <h2>🔗 Ligações PIX Ativas</h2>
                         <table class="tabela-historico">
                             <thead><tr><th>Nº do Caixa</th><th>Máquina Destino</th><th>Ação</th></tr></thead>
                             <tbody id="lista-vinculos"><tr><td colspan="3" style="text-align:center;">Aguardando...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="view-point" class="view-section ${abaAtiva === 'view-point' ? 'active' : ''}">
+                    <h2 style="font-size: 20px;">Vincular Máquina Point (Cartão)</h2>
+                    <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 20px;">Encontre o Device ID (Número de Série) atrás da sua maquininha.</p>
+                    <div class="card" style="max-width: 600px; margin-bottom: 30px;">
+                        <form action="/vincular-maquininha" method="POST" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <div style="flex: 1; min-width: 150px;"><label>Device ID (Point)</label><input type="text" name="device_id" class="form-input" placeholder="Ex: PAX_A910_12345" required></div>
+                            <div style="flex: 1; min-width: 150px;"><label>Máquina Destino</label><input type="text" name="maquina_id" class="form-input" placeholder="Ex: GRUA-1234" required></div>
+                            <div style="width: 100%; margin-top: 5px;"><button type="submit" class="btn-point">Vincular Point à Grua</button></div>
+                        </form>
+                    </div>
+                    <div class="card tabela-historico-container">
+                        <h2>💳 Máquinas de Cartão Ativas</h2>
+                        <table class="tabela-historico">
+                            <thead><tr><th>Máquina Destino (Grua)</th><th>Device ID (Point)</th><th>Ação</th></tr></thead>
+                            <tbody id="lista-points"><tr><td colspan="3" style="text-align:center;">Aguardando...</td></tr></tbody>
                         </table>
                     </div>
                 </div>
@@ -347,7 +414,6 @@ app.get('/painel', (req, res) => {
                 const firebaseConfig = { databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" };
                 firebase.initializeApp(firebaseConfig);
                 const db = firebase.database();
-
                 const ctx = document.getElementById('graficoFaturamento').getContext('2d');
                 let grafico = new Chart(ctx, { type: 'bar', data: { labels: [], datasets: [{ label: 'Faturamento (R$)', data: [], backgroundColor: '#93c5fd' }] }, options: { responsive: true, maintainAspectRatio: false }});
 
@@ -355,10 +421,8 @@ app.get('/painel', (req, res) => {
                     const container = document.getElementById('container-maquinas');
                     container.innerHTML = ''; 
                     
-                    let faturamentoGlobalHoje = 0;
-                    let qtdMaquinasOnline = 0;
-                    const vendasGlobalPorDia = {};
-                    const hojeStr = new Date().toLocaleDateString('pt-BR');
+                    let faturamentoGlobalHoje = 0; let qtdMaquinasOnline = 0;
+                    const vendasGlobalPorDia = {}; const hojeStr = new Date().toLocaleDateString('pt-BR');
                     let todasAsVendas = [];
 
                     snap.forEach(maquinaSnap => {
@@ -370,10 +434,7 @@ app.get('/painel', (req, res) => {
                         if (dados.ultimo_ping) {
                             const diffSegundos = (Date.now() - dados.ultimo_ping) / 1000;
                             textoPing = new Date(dados.ultimo_ping).toLocaleTimeString('pt-BR');
-                            if (diffSegundos < 120) {
-                                statusHtml = '<span class="status-online">ONLINE</span>';
-                                qtdMaquinasOnline++;
-                            }
+                            if (diffSegundos < 120) { statusHtml = '<span class="status-online">ONLINE</span>'; qtdMaquinasOnline++; }
                         }
 
                         if (dados.historico_vendas) {
@@ -389,26 +450,20 @@ app.get('/painel', (req, res) => {
 
                         const pulso = dados.configuracoes?.tempo_pulso_ms || 100;
                         const pausa = dados.configuracoes?.tempo_pausa_ms || 400;
+                        const bonus_valor = dados.configuracoes?.bonus_valor || 0;
+                        const bonus_pulsos = dados.configuracoes?.bonus_pulsos || 0;
 
-                        // === LÓGICA DE WI-FI DO CARTÃO ===
                         const rede = dados.rede || {};
                         let ssid = rede.ssid || 'Desconhecido';
                         const rssi = rede.rssi || -100;
 
-                        let sinalIcon = '📶';
-                        let sinalCor = '#9ca3af';
-                        let sinalTexto = 'Sem Sinal';
-
+                        let sinalIcon = '📶'; let sinalCor = '#9ca3af'; let sinalTexto = 'Sem Sinal';
                         if (statusHtml.includes('ONLINE')) {
                             if (rssi > -60) { sinalCor = '#10b981'; sinalTexto = 'Excelente'; } 
                             else if (rssi > -75) { sinalCor = '#fbbf24'; sinalTexto = 'Bom'; } 
                             else if (rssi > -85) { sinalCor = '#f97316'; sinalTexto = 'Fraco'; } 
                             else { sinalCor = '#ef4444'; sinalTexto = 'Péssimo'; } 
-                        } else {
-                            sinalIcon = '📵';
-                            sinalTexto = 'Offline';
-                            ssid = '---';
-                        }
+                        } else { sinalIcon = '📵'; sinalTexto = 'Offline'; ssid = '---'; }
 
                         const cardHtml = \`
                             <div class="card" style="margin-bottom: 0;">
@@ -416,41 +471,48 @@ app.get('/painel', (req, res) => {
                                     <div><h3 style="margin: 0; font-size: 16px; color: #111827;">🕹️ \${idDaMaquina}</h3></div>
                                     <div style="display: flex; gap: 10px; align-items: center;">
                                         \${statusHtml}
-                                        <form action="/deletar-maquina" method="POST" style="margin: 0;">
-                                            <input type="hidden" name="maquina" value="\${idDaMaquina}">
-                                            <button type="submit" onclick="return confirm('Tem certeza?');" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 16px;">🗑️</button>
-                                        </form>
+                                        <form action="/deletar-maquina" method="POST" style="margin: 0;"><input type="hidden" name="maquina" value="\${idDaMaquina}"><button type="submit" onclick="return confirm('Tem certeza?');" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 16px;">🗑️</button></form>
                                     </div>
                                 </div>
                                 <p style="color: var(--text-muted); font-size: 12px; margin: 0;">Último ping: \${textoPing}</p>
                                 
                                 <div style="background: #f9fafb; padding: 10px; border-radius: 6px; margin: 12px 0; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border);">
-                                    <div>
-                                        <div style="font-size: 10px; font-weight: bold; color: var(--text-muted); text-transform: uppercase;">Wi-Fi Conectado</div>
-                                        <div style="font-size: 13px; font-weight: 600; color: #111827; margin-top: 2px;">\${ssid}</div>
-                                    </div>
-                                    <div style="text-align: right;">
-                                        <div style="font-size: 10px; font-weight: bold; color: var(--text-muted); text-transform: uppercase;">Força do Sinal</div>
-                                        <div style="font-size: 12px; font-weight: bold; color: \${sinalCor}; margin-top: 2px;">\${sinalIcon} \${sinalTexto}</div>
-                                    </div>
+                                    <div><div style="font-size: 10px; font-weight: bold; color: var(--text-muted);">Wi-Fi Conectado</div><div style="font-size: 13px; font-weight: 600; margin-top: 2px;">\${ssid}</div></div>
+                                    <div style="text-align: right;"><div style="font-size: 10px; font-weight: bold; color: var(--text-muted);">Sinal</div><div style="font-size: 12px; font-weight: bold; color: \${sinalCor}; margin-top: 2px;">\${sinalIcon} \${sinalTexto}</div></div>
                                 </div>
 
                                 <hr style="margin: 15px 0;">
+                                
                                 <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                                    <button onclick="abrirModal('\${idDaMaquina}')" style="flex: 1; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: bold; color: #374151; font-size: 12px;">🎟️ Crédito</button>
-                                    <form action="/reiniciar-maquina" method="POST" style="flex: 1; margin: 0;">
-                                        <input type="hidden" name="maquina" value="\${idDaMaquina}">
-                                        <button type="submit" onclick="return confirm('Reiniciar \${idDaMaquina}?');" style="width: 100%; padding: 10px; background: #fee2e2; border: 1px solid #fca5a5; color: #b91c1c; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px;">🔄 Reiniciar</button>
+                                    <form action="/cobrar-cartao" method="POST" style="flex: 1; margin: 0;">
+                                        <input type="hidden" name="maquina_id" value="\${idDaMaquina}">
+                                        <input type="hidden" name="valor" value="2.00">
+                                        <button type="submit" style="width: 100%; padding: 10px; background: #009ee3; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 12px;">💳 Acordar Point</button>
                                     </form>
+                                    <button onclick="abrirModal('\${idDaMaquina}')" style="flex: 1; padding: 10px; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: bold; color: #374151; font-size: 12px;">🎟️ Ficha Grátis</button>
                                 </div>
-                                <h4 style="margin: 0 0 10px 0; color: #374151; font-size: 13px;">⚙️ Relé</h4>
+
+                                <h4 style="margin: 0 0 10px 0; color: #374151; font-size: 13px;">⚙️ Hardware e Promoções</h4>
                                 <form action="/salvar-config" method="POST">
                                     <input type="hidden" name="maquina" value="\${idDaMaquina}">
-                                    <div style="display: flex; gap: 10px;">
-                                        <div style="flex:1;"><label style="font-size:10px;">Pulso</label><input type="number" name="pulso" class="form-input" value="\${pulso}"></div>
-                                        <div style="flex:1;"><label style="font-size:10px;">Pausa</label><input type="number" name="pausa" class="form-input" value="\${pausa}"></div>
+                                    
+                                    <div style="display: flex; gap: 10px; margin-bottom: 5px;">
+                                        <div style="flex:1;"><label style="font-size:10px;">Pulso (ms)</label><input type="number" name="pulso" class="form-input" value="\${pulso}"></div>
+                                        <div style="flex:1;"><label style="font-size:10px;">Pausa (ms)</label><input type="number" name="pausa" class="form-input" value="\${pausa}"></div>
                                     </div>
-                                    <button type="submit" class="btn-primary" style="padding: 8px; font-size: 12px;">💾 Salvar</button>
+                                    
+                                    <div style="display: flex; gap: 10px;">
+                                        <div style="flex:1;">
+                                            <label style="font-size:10px; color: #047857;">Gatilho Bônus (R$)</label>
+                                            <input type="number" step="0.01" name="bonus_valor" class="form-input" value="\${bonus_valor}" placeholder="Ex: 20">
+                                        </div>
+                                        <div style="flex:1;">
+                                            <label style="font-size:10px; color: #047857;">Pulsos Extra</label>
+                                            <input type="number" name="bonus_pulsos" class="form-input" value="\${bonus_pulsos}" placeholder="Ex: 2">
+                                        </div>
+                                    </div>
+
+                                    <button type="submit" class="btn-primary" style="padding: 8px; font-size: 12px;">💾 Salvar Configurações</button>
                                 </form>
                             </div>
                         \`;
@@ -461,19 +523,18 @@ app.get('/painel', (req, res) => {
                     const ultimasVendas = todasAsVendas.slice(0, 15);
                     const tbody = document.getElementById('lista-pagamentos');
                     tbody.innerHTML = ''; 
-                    if (ultimasVendas.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af;">Sem pagamentos.</td></tr>';
-                    } else {
+                    if (ultimasVendas.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af;">Sem pagamentos.</td></tr>'; } 
+                    else {
                         ultimasVendas.forEach(v => {
                             const dataFormatada = new Date(v.data).toLocaleString('pt-BR');
                             const valorFormatado = 'R$ ' + v.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2});
-                            const posAviso = v.pos_id_recebido ? v.pos_id_recebido : '---';
+                            const iconePgto = v.metodo === 'CARTÃO' ? '💳 Cartão' : '🪙 PIX';
                             tbody.innerHTML += \`
                                 <tr>
                                     <td>\${dataFormatada}</td>
                                     <td style="font-weight: bold;">\${v.maquina}</td>
                                     <td style="color: #047857; font-weight: bold;">\${valorFormatado}</td>
-                                    <td style="color: #6b7280; font-size: 12px;">\${posAviso}</td>
+                                    <td style="font-size: 12px; font-weight: bold;">\${iconePgto}</td>
                                     <td style="color: #10b981; font-size: 12px;">\${v.status_liberacao || 'Liberado'}</td>
                                 </tr>
                             \`;
@@ -487,26 +548,21 @@ app.get('/painel', (req, res) => {
                 });
 
                 db.ref('/Vinculos-Caixas').on('value', snap => {
-                    const tbodyVinculos = document.getElementById('lista-vinculos');
-                    tbodyVinculos.innerHTML = '';
-                    if (!snap.exists()) {
-                        tbodyVinculos.innerHTML = '<tr><td colspan="3" style="text-align:center; color: #9ca3af;">Nenhum vínculo registado.</td></tr>';
-                    } else {
-                        snap.forEach(vinculo => {
-                            tbodyVinculos.innerHTML += \`
-                                <tr>
-                                    <td style="font-weight: bold; color: #111827;">\${vinculo.key}</td>
-                                    <td style="font-weight: bold; color: var(--blue);">\${vinculo.val()}</td>
-                                    <td>
-                                        <form action="/desvincular-caixa" method="POST" style="margin: 0;">
-                                            <input type="hidden" name="pos_id" value="\${vinculo.key}">
-                                            <button type="submit" class="btn-danger" onclick="return confirm('Desvincular o Caixa \${vinculo.key}?');">Desvincular</button>
-                                        </form>
-                                    </td>
-                                </tr>
-                            \`;
-                        });
-                    }
+                    const tbody = document.getElementById('lista-vinculos'); tbody.innerHTML = '';
+                    if (!snap.exists()) tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">Nenhum vínculo PIX.</td></tr>';
+                    else snap.forEach(v => {
+                        tbody.innerHTML += \`<tr><td style="font-weight:bold;">\${v.key}</td><td style="font-weight:bold; color:var(--blue);">\${v.val()}</td>
+                        <td><form action="/desvincular-caixa" method="POST" style="margin:0;"><input type="hidden" name="pos_id" value="\${v.key}"><button type="submit" class="btn-danger">Desvincular</button></form></td></tr>\`;
+                    });
+                });
+
+                db.ref('/Vinculos-Maquininhas').on('value', snap => {
+                    const tbody = document.getElementById('lista-points'); tbody.innerHTML = '';
+                    if (!snap.exists()) tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;">Nenhuma máquina Point vinculada.</td></tr>';
+                    else snap.forEach(v => {
+                        tbody.innerHTML += \`<tr><td style="font-weight:bold; color:var(--blue);">\${v.key}</td><td style="font-weight:bold;">\${v.val()}</td>
+                        <td><form action="/desvincular-maquininha" method="POST" style="margin:0;"><input type="hidden" name="maquina_id" value="\${v.key}"><button type="submit" class="btn-danger">Desvincular</button></form></td></tr>\`;
+                    });
                 });
             </script>
         </body>
@@ -515,4 +571,4 @@ app.get('/painel', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor Online com Monitor de Sinal Wi-Fi!"));
+app.listen(PORT, () => console.log("Servidor Online com Integração de Bônus!"));
