@@ -24,7 +24,7 @@ try {
 const db = admin.database();
 
 // ==========================================
-// 🧠 NOVO SISTEMA DE CONFIRMAÇÃO DE DUPLA VIA
+// 🧠 SISTEMA DE CONFIRMAÇÃO DE DUPLA VIA
 // ==========================================
 async function liberarCredito(maquinaID, pulsos, historyKey = null) {
     const ref = db.ref(`Vending-Machines/${maquinaID}`);
@@ -35,23 +35,19 @@ async function liberarCredito(maquinaID, pulsos, historyKey = null) {
         });
         console.log(`✅ Adicionado +${pulsos} pulsos para ${maquinaID}`);
 
-        // Espera 60 segundos para ver se a ESP32 consumiu o crédito
         setTimeout(async () => {
             const snapshot = await ref.child("jogadas_pendentes").once("value");
             
             if (snapshot.val() > 0) {
-                // A máquina não pegou. Vamos zerar a fila por segurança.
                 await ref.update({ "jogadas_pendentes": 0 });
                 console.log(`❌ TIMEOUT: ${maquinaID} offline. Fila zerada.`);
                 
-                // Atualiza a Dashboard informando que o crédito se perdeu
                 if (historyKey) {
                     await db.ref(`Vending-Machines/${maquinaID}/historico_vendas/${historyKey}`).update({
                         status_liberacao: 'Expirado (Offline) ❌'
                     });
                 }
             } else {
-                // A máquina pegou o crédito e zerou a variável!
                 if (historyKey) {
                     await db.ref(`Vending-Machines/${maquinaID}/historico_vendas/${historyKey}`).update({
                         status_liberacao: 'Consumido ✅'
@@ -110,19 +106,28 @@ app.post('/webhook', async (req, res) => {
                 const diferencaEmMinutos = (dataAgora - dataPagamento) / (1000 * 60);
 
                 let pulsosFinais = pulsosBase;
-                let statusInicial = "Aguardando Máquina ⏳"; // Status temporário
+                let statusInicial = "Aguardando Máquina ⏳"; 
                 
                 if (diferencaEmMinutos > 3) {
                     console.log(`⏳ Pagamento antigo. Guardado, NÃO libertando na ${maquinaID}.`);
                     statusInicial = "Bloqueado (Antigo)";
                 }
 
-                // Salva no histórico ANTES de liberar, para pegarmos a "chave" da venda
+                // ========================================================
+                // 🕵️ CORREÇÃO: DETETAR CORRETAMENTE SE É PIX OU CARTÃO
+                // ========================================================
+                let tipoPagamento = 'CARTÃO';
+                if (response.data.payment_method_id === 'pix' || 
+                    response.data.payment_type_id === 'bank_transfer' || 
+                    response.data.payment_type_id === 'account_money') {
+                    tipoPagamento = 'PIX';
+                }
+
                 const historyRef = await db.ref(`Vending-Machines/${maquinaID}/historico_vendas`).push({
                     valor: valor,
                     data: Date.now(),
                     id_pagamento: paymentId,
-                    metodo: response.data.payment_type_id === 'account_money' ? 'PIX/SALDO' : 'CARTÃO',
+                    metodo: tipoPagamento,
                     pos_id_recebido: posId,
                     status_liberacao: statusInicial
                 });
@@ -140,7 +145,6 @@ app.post('/webhook', async (req, res) => {
                         console.log(`🎁 BÔNUS APLICADO: +${pulsosExtra} jogadas grátis para ${maquinaID}!`);
                     }
 
-                    // Passamos a chave do histórico para a função atualizar depois de 60 segundos
                     liberarCredito(maquinaID, pulsosFinais, historyRef.key);
                 }
             }
@@ -491,10 +495,9 @@ app.get('/painel', (req, res) => {
                             const valorFormatado = 'R$ ' + v.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2});
                             const iconePgto = v.metodo === 'CARTÃO' ? '💳 Cartão' : '🪙 PIX';
                             
-                            // Colorir o status com base na palavra
-                            let corStatus = '#10b981'; // Verde padrão
-                            if (v.status_liberacao && v.status_liberacao.includes('Offline')) corStatus = '#ef4444'; // Vermelho
-                            else if (v.status_liberacao && v.status_liberacao.includes('Aguardando')) corStatus = '#fbbf24'; // Amarelo
+                            let corStatus = '#10b981'; 
+                            if (v.status_liberacao && v.status_liberacao.includes('Offline')) corStatus = '#ef4444'; 
+                            else if (v.status_liberacao && v.status_liberacao.includes('Aguardando')) corStatus = '#fbbf24'; 
                             
                             tbody.innerHTML += \`
                                 <tr>
