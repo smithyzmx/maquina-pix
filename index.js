@@ -231,9 +231,9 @@ app.get('/painel', (req, res) => {
                 .view-section.active { display: block; }
                 .card { background: #fff; border-radius: 10px; border: 1px solid var(--border); padding: 25px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
                 h2 { margin-top: 0; font-size: 18px; color: #111827; margin-bottom: 20px; }
-                .grid-top { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+                .grid-top { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 20px; }
                 .grid-maquinas { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
-                .chart-container { height: 300px; width: 100%; }
+                .chart-container { height: 200px; width: 100%; }
                 .status-online { background: #def7ec; color: #03543f; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
                 .status-offline { background: #fde8e8; color: #9b1c1c; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
                 label { font-size: 0.85rem; color: var(--text-muted); font-weight: bold; }
@@ -270,7 +270,7 @@ app.get('/painel', (req, res) => {
                     .grid-top { grid-template-columns: 1fr; gap: 15px; }
                     .grid-maquinas { grid-template-columns: 1fr; gap: 15px; }
                     .card { padding: 20px; }
-                    .chart-container { height: 250px; }
+                    .chart-container { height: 200px; }
                 }
             </style>
         </head>
@@ -289,6 +289,17 @@ app.get('/painel', (req, res) => {
 
                 <div id="view-dashboard" class="view-section ${abaAtiva === 'view-dashboard' ? 'active' : ''}">
                     <div class="grid-top">
+                        <!-- CARTÃO 1: HOJE -->
+                        <div class="card">
+                            <h2>Faturamento Hoje</h2>
+                            <h1 id="faturamento-hoje" style="font-size: 32px; margin: 10px 0; color: #10b981;">R$ 0,00</h1>
+                            <p style="color: var(--text-muted); font-size: 14px;">Em toda a rede hoje</p>
+                            
+                            <hr style="margin: 20px 0;">
+                            <p style="color: var(--text-muted); font-size: 14px; margin: 0;">Máquinas Online: <span id="maquinas-online-count" style="font-weight: bold; color: #03543f; font-size: 18px;">0</span></p>
+                        </div>
+
+                        <!-- CARTÃO 2: MÊS -->
                         <div class="card">
                             <h2>Faturamento Mensal</h2>
                             <div style="display: flex; gap: 10px; margin-bottom: 15px;">
@@ -314,11 +325,10 @@ app.get('/painel', (req, res) => {
                             </div>
                             
                             <h1 id="faturamento-mes" style="font-size: 32px; margin: 10px 0; color: var(--blue);">R$ 0,00</h1>
-                            <p style="color: var(--text-muted); font-size: 14px;">Total no período selecionado</p>
-                            
-                            <hr style="margin: 20px 0;">
-                            <p style="color: var(--text-muted); font-size: 14px; margin: 0;">Máquinas Online Agora: <span id="maquinas-online-count" style="font-weight: bold; color: #03543f; font-size: 18px;">0</span></p>
+                            <p style="color: var(--text-muted); font-size: 14px;">Total no período acima</p>
                         </div>
+
+                        <!-- CARTÃO 3: GRÁFICO -->
                         <div class="card">
                             <h2>Evolução no Mês</h2>
                             <div class="chart-container"><canvas id="graficoFaturamento"></canvas></div>
@@ -445,8 +455,11 @@ app.get('/painel', (req, res) => {
                     const anoFiltro = parseInt(document.getElementById('filtro-ano').value);
 
                     let faturamentoMes = 0;
+                    let faturamentoHoje = 0;
                     let vendasFiltradas = [];
                     let vendasPorDia = {};
+                    
+                    const strHoje = new Date().toLocaleDateString('pt-BR');
 
                     // Criar estrutura para todos os dias do mês selecionado
                     const diasNoMes = new Date(anoFiltro, mesFiltro + 1, 0).getDate();
@@ -459,7 +472,13 @@ app.get('/painel', (req, res) => {
                         if (maq.historico_vendas) {
                             Object.values(maq.historico_vendas).forEach(v => {
                                 const dataVenda = new Date(v.data);
-                                // Filtra se a venda bate com o mês e ano do cabeçalho
+                                
+                                // SEMPRE calcula o faturamento do dia de hoje (independente do filtro)
+                                if (dataVenda.toLocaleDateString('pt-BR') === strHoje) {
+                                    faturamentoHoje += v.valor;
+                                }
+
+                                // Filtra para a tabela e o gráfico (Mês selecionado)
                                 if (dataVenda.getMonth() === mesFiltro && dataVenda.getFullYear() === anoFiltro) {
                                     faturamentoMes += v.valor;
                                     vendasFiltradas.push({ maquina: idMaquina, ...v });
@@ -471,7 +490,8 @@ app.get('/painel', (req, res) => {
                         }
                     });
 
-                    // Atualizar painel de faturamento total
+                    // Atualizar painéis
+                    document.getElementById('faturamento-hoje').innerText = 'R$ ' + faturamentoHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
                     document.getElementById('faturamento-mes').innerText = 'R$ ' + faturamentoMes.toLocaleString('pt-BR', {minimumFractionDigits: 2});
 
                     // Atualizar Gráfico com todos os dias do mês
@@ -610,4 +630,5 @@ app.get('/painel', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor Online - Dashboard Mensal!"));
+app.listen(PORT, () => console.log("Servidor Online - Dashboard Mensal e Diária!"));
+
