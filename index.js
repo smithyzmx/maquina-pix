@@ -113,9 +113,6 @@ app.post('/webhook', async (req, res) => {
                     statusInicial = "Bloqueado (Antigo)";
                 }
 
-                // ========================================================
-                // 🕵️ CORREÇÃO: DETETAR CORRETAMENTE SE É PIX OU CARTÃO
-                // ========================================================
                 let tipoPagamento = 'CARTÃO';
                 if (response.data.payment_method_id === 'pix' || 
                     response.data.payment_type_id === 'bank_transfer' || 
@@ -155,7 +152,7 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ==========================================
-// ROTAS PARA VÍNCULOS (PIX / POINT VIA POS ID)
+// ROTAS PARA VÍNCULOS
 // ==========================================
 app.post('/vincular-caixa', async (req, res) => {
     const posId = req.body.pos_id;
@@ -170,7 +167,7 @@ app.post('/desvincular-caixa', async (req, res) => {
 });
 
 // ==========================================
-// GESTÃO DA PLACA E HARDWARE
+// GESTÃO DA PLACA
 // ==========================================
 app.post('/salvar-config', async (req, res) => {
     const maquina = req.body.maquina || "Maquina-01";
@@ -245,10 +242,14 @@ app.get('/painel', (req, res) => {
                 .btn-primary:hover { background: #1e40af; }
                 .btn-danger { background: #ef4444; color: white; padding: 8px 15px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
                 hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
+                
+                /* Tabela com Scroll e Cabeçalho Fixo */
+                .tabela-wrapper { max-height: 400px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
                 .tabela-historico { width: 100%; border-collapse: collapse; font-size: 14px; }
-                .tabela-historico th { text-align: left; padding: 12px; border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: 600; }
+                .tabela-historico th { text-align: left; padding: 12px; border-bottom: 2px solid var(--border); color: var(--text-muted); font-weight: 600; position: sticky; top: 0; background: #fff; z-index: 10; box-shadow: 0 2px 2px -1px rgba(0,0,0,0.1); }
                 .tabela-historico td { padding: 12px; border-bottom: 1px solid var(--border); }
                 .tabela-historico tr:hover { background-color: #f9fafb; }
+                
                 .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; padding: 15px; box-sizing: border-box; }
                 .modal { background: #fff; width: 100%; max-width: 400px; border-radius: 8px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); text-align: center; }
                 .modal-header { background: #f3f4f6; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; border-bottom: 1px solid var(--border); }
@@ -257,6 +258,7 @@ app.get('/painel', (req, res) => {
                 .input-group { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
                 .input-group input { width: 80px; padding: 12px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 18px; text-align: center; }
                 .btn-yellow { background: #fbbf24; color: #fff; border: none; padding: 12px 20px; border-radius: 4px; font-weight: bold; font-size: 14px; cursor: pointer; flex: 1; }
+                
                 @media (max-width: 768px) {
                     body { flex-direction: column; overflow: visible; }
                     .sidebar { width: 100%; padding: 15px 0 0 0; border-right: none; border-bottom: 1px solid var(--border); }
@@ -269,7 +271,6 @@ app.get('/painel', (req, res) => {
                     .grid-maquinas { grid-template-columns: 1fr; gap: 15px; }
                     .card { padding: 20px; }
                     .chart-container { height: 250px; }
-                    .tabela-historico-container { overflow-x: auto; }
                 }
             </style>
         </head>
@@ -289,22 +290,49 @@ app.get('/painel', (req, res) => {
                 <div id="view-dashboard" class="view-section ${abaAtiva === 'view-dashboard' ? 'active' : ''}">
                     <div class="grid-top">
                         <div class="card">
-                            <h2>Total Diário <span style="font-weight: normal; color: #6b7280; font-size: 14px;">(Rede)</span></h2>
-                            <h1 id="faturamento-hoje" style="font-size: 32px; margin: 10px 0; color: var(--blue);">R$ 0,00</h1>
-                            <p style="color: var(--text-muted); font-size: 14px;">Máquinas Online: <span id="maquinas-online-count" style="font-weight: bold; color: #03543f;">0</span></p>
+                            <h2>Faturamento Mensal</h2>
+                            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                                <select id="filtro-mes" class="form-input" style="margin:0; padding: 8px; font-weight: bold; width: auto;">
+                                    <option value="0">Janeiro</option>
+                                    <option value="1">Fevereiro</option>
+                                    <option value="2">Março</option>
+                                    <option value="3">Abril</option>
+                                    <option value="4">Maio</option>
+                                    <option value="5">Junho</option>
+                                    <option value="6">Julho</option>
+                                    <option value="7">Agosto</option>
+                                    <option value="8">Setembro</option>
+                                    <option value="9">Outubro</option>
+                                    <option value="10">Novembro</option>
+                                    <option value="11">Dezembro</option>
+                                </select>
+                                <select id="filtro-ano" class="form-input" style="margin:0; padding: 8px; font-weight: bold; width: auto;">
+                                    <option value="2025">2025</option>
+                                    <option value="2026">2026</option>
+                                    <option value="2027">2027</option>
+                                </select>
+                            </div>
+                            
+                            <h1 id="faturamento-mes" style="font-size: 32px; margin: 10px 0; color: var(--blue);">R$ 0,00</h1>
+                            <p style="color: var(--text-muted); font-size: 14px;">Total no período selecionado</p>
+                            
+                            <hr style="margin: 20px 0;">
+                            <p style="color: var(--text-muted); font-size: 14px; margin: 0;">Máquinas Online Agora: <span id="maquinas-online-count" style="font-weight: bold; color: #03543f; font-size: 18px;">0</span></p>
                         </div>
                         <div class="card">
-                            <h2>Faturamento <span style="font-weight: normal; color: #6b7280; font-size: 14px;">Últimos 7 dias</span></h2>
+                            <h2>Evolução no Mês</h2>
                             <div class="chart-container"><canvas id="graficoFaturamento"></canvas></div>
                         </div>
                     </div>
                     
-                    <div class="card tabela-historico-container">
-                        <h2>💰 Últimos Pagamentos Recebidos</h2>
-                        <table class="tabela-historico">
-                            <thead><tr><th>Data</th><th>Máquina</th><th>Valor</th><th>Método</th><th>Status</th></tr></thead>
-                            <tbody id="lista-pagamentos"><tr><td colspan="5" style="text-align:center;">Carregando...</td></tr></tbody>
-                        </table>
+                    <div class="card">
+                        <h2>💰 Todos os Pagamentos do Mês</h2>
+                        <div class="tabela-wrapper">
+                            <table class="tabela-historico">
+                                <thead><tr><th>Data</th><th>Máquina</th><th>Valor</th><th>Método</th><th>Status</th></tr></thead>
+                                <tbody id="lista-pagamentos"><tr><td colspan="5" style="text-align:center;">Carregando...</td></tr></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
@@ -381,23 +409,114 @@ app.get('/painel', (req, res) => {
                     });
                 }
 
+                // INICIALIZAÇÃO FIREBASE E GRÁFICO
                 const firebaseConfig = { databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" };
                 firebase.initializeApp(firebaseConfig);
                 const db = firebase.database();
+                
                 const ctx = document.getElementById('graficoFaturamento').getContext('2d');
-                let grafico = new Chart(ctx, { type: 'bar', data: { labels: [], datasets: [{ label: 'Faturamento (R$)', data: [], backgroundColor: '#93c5fd' }] }, options: { responsive: true, maintainAspectRatio: false }});
+                let grafico = new Chart(ctx, { 
+                    type: 'bar', 
+                    data: { labels: [], datasets: [{ label: 'Faturamento Diário (R$)', data: [], backgroundColor: '#93c5fd' }] }, 
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+
+                let dadosOriginais = null;
+
+                // Setar selects com mês e ano atuais no carregamento
+                const dataHoje = new Date();
+                document.getElementById('filtro-mes').value = dataHoje.getMonth();
+                document.getElementById('filtro-ano').value = dataHoje.getFullYear();
+
+                // Adicionar evento para quando você mudar o mês ou ano na tela
+                document.getElementById('filtro-mes').addEventListener('change', processarDashboard);
+                document.getElementById('filtro-ano').addEventListener('change', processarDashboard);
 
                 db.ref('/Vending-Machines').on('value', snap => {
+                    dadosOriginais = snap.val() || {};
+                    processarMaquinas();
+                    processarDashboard();
+                });
+
+                function processarDashboard() {
+                    if(!dadosOriginais) return;
+
+                    const mesFiltro = parseInt(document.getElementById('filtro-mes').value);
+                    const anoFiltro = parseInt(document.getElementById('filtro-ano').value);
+
+                    let faturamentoMes = 0;
+                    let vendasFiltradas = [];
+                    let vendasPorDia = {};
+
+                    // Criar estrutura para todos os dias do mês selecionado
+                    const diasNoMes = new Date(anoFiltro, mesFiltro + 1, 0).getDate();
+                    for (let i = 1; i <= diasNoMes; i++) {
+                        vendasPorDia[i.toString().padStart(2, '0')] = 0;
+                    }
+
+                    Object.keys(dadosOriginais).forEach(idMaquina => {
+                        const maq = dadosOriginais[idMaquina];
+                        if (maq.historico_vendas) {
+                            Object.values(maq.historico_vendas).forEach(v => {
+                                const dataVenda = new Date(v.data);
+                                // Filtra se a venda bate com o mês e ano do cabeçalho
+                                if (dataVenda.getMonth() === mesFiltro && dataVenda.getFullYear() === anoFiltro) {
+                                    faturamentoMes += v.valor;
+                                    vendasFiltradas.push({ maquina: idMaquina, ...v });
+                                    
+                                    const diaString = dataVenda.getDate().toString().padStart(2, '0');
+                                    vendasPorDia[diaString] += v.valor;
+                                }
+                            });
+                        }
+                    });
+
+                    // Atualizar painel de faturamento total
+                    document.getElementById('faturamento-mes').innerText = 'R$ ' + faturamentoMes.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+
+                    // Atualizar Gráfico com todos os dias do mês
+                    grafico.data.labels = Object.keys(vendasPorDia).map(dia => dia + '/' + (mesFiltro + 1).toString().padStart(2, '0'));
+                    grafico.data.datasets[0].data = Object.values(vendasPorDia);
+                    grafico.update();
+
+                    // Preencher Tabela de Vendas (da mais recente para a mais antiga)
+                    vendasFiltradas.sort((a, b) => b.data - a.data);
+                    const tbody = document.getElementById('lista-pagamentos');
+                    tbody.innerHTML = ''; 
+                    
+                    if (vendasFiltradas.length === 0) { 
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af; padding: 30px 0;">Sem pagamentos neste período.</td></tr>'; 
+                    } else {
+                        vendasFiltradas.forEach(v => {
+                            const dataFormatada = new Date(v.data).toLocaleString('pt-BR');
+                            const valorFormatado = 'R$ ' + v.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+                            const iconePgto = v.metodo === 'CARTÃO' ? '💳 Cartão' : '🪙 PIX';
+                            
+                            let corStatus = '#10b981'; 
+                            if (v.status_liberacao && v.status_liberacao.includes('Offline')) corStatus = '#ef4444'; 
+                            else if (v.status_liberacao && v.status_liberacao.includes('Aguardando')) corStatus = '#fbbf24'; 
+                            
+                            tbody.innerHTML += \`
+                                <tr>
+                                    <td>\${dataFormatada}</td>
+                                    <td style="font-weight: bold;">\${v.maquina}</td>
+                                    <td style="color: #047857; font-weight: bold;">\${valorFormatado}</td>
+                                    <td style="font-size: 12px; font-weight: bold;">\${iconePgto}</td>
+                                    <td style="color: \${corStatus}; font-size: 12px; font-weight: 500;">\${v.status_liberacao || 'Consumido ✅'}</td>
+                                </tr>
+                            \`;
+                        });
+                    }
+                }
+
+                function processarMaquinas() {
+                    if(!dadosOriginais) return;
                     const container = document.getElementById('container-maquinas');
                     container.innerHTML = ''; 
-                    
-                    let faturamentoGlobalHoje = 0; let qtdMaquinasOnline = 0;
-                    const vendasGlobalPorDia = {}; const hojeStr = new Date().toLocaleDateString('pt-BR');
-                    let todasAsVendas = [];
+                    let qtdMaquinasOnline = 0;
 
-                    snap.forEach(maquinaSnap => {
-                        const idDaMaquina = maquinaSnap.key; 
-                        const dados = maquinaSnap.val();
+                    Object.keys(dadosOriginais).forEach(idDaMaquina => {
+                        const dados = dadosOriginais[idDaMaquina];
                         
                         let statusHtml = '<span class="status-offline">OFFLINE</span>';
                         let textoPing = '--:--';
@@ -405,17 +524,6 @@ app.get('/painel', (req, res) => {
                             const diffSegundos = (Date.now() - dados.ultimo_ping) / 1000;
                             textoPing = new Date(dados.ultimo_ping).toLocaleTimeString('pt-BR');
                             if (diffSegundos < 120) { statusHtml = '<span class="status-online">ONLINE</span>'; qtdMaquinasOnline++; }
-                        }
-
-                        if (dados.historico_vendas) {
-                            Object.values(dados.historico_vendas).forEach(venda => {
-                                todasAsVendas.push({ maquina: idDaMaquina, ...venda });
-                                const dataVenda = new Date(venda.data);
-                                const dataStr = dataVenda.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-                                if(!vendasGlobalPorDia[dataStr]) vendasGlobalPorDia[dataStr] = 0;
-                                vendasGlobalPorDia[dataStr] += venda.valor;
-                                if (dataVenda.toLocaleDateString('pt-BR') === hojeStr) faturamentoGlobalHoje += venda.valor;
-                            });
                         }
 
                         const pulso = dados.configuracoes?.tempo_pulso_ms || 100;
@@ -477,45 +585,15 @@ app.get('/painel', (req, res) => {
                                         </div>
                                     </div>
 
-                                    <button type="submit" class="btn-primary" style="padding: 8px; font-size: 12px;">💾 Salvar Configurações</button>
+                                    <button type="submit" class="btn-primary" style="padding: 8px; font-size: 12px;">💾 Salvar</button>
                                 </form>
                             </div>
                         \`;
                         container.innerHTML += cardHtml;
                     });
-
-                    todasAsVendas.sort((a, b) => b.data - a.data);
-                    const ultimasVendas = todasAsVendas.slice(0, 15);
-                    const tbody = document.getElementById('lista-pagamentos');
-                    tbody.innerHTML = ''; 
-                    if (ultimasVendas.length === 0) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af;">Sem pagamentos.</td></tr>'; } 
-                    else {
-                        ultimasVendas.forEach(v => {
-                            const dataFormatada = new Date(v.data).toLocaleString('pt-BR');
-                            const valorFormatado = 'R$ ' + v.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2});
-                            const iconePgto = v.metodo === 'CARTÃO' ? '💳 Cartão' : '🪙 PIX';
-                            
-                            let corStatus = '#10b981'; 
-                            if (v.status_liberacao && v.status_liberacao.includes('Offline')) corStatus = '#ef4444'; 
-                            else if (v.status_liberacao && v.status_liberacao.includes('Aguardando')) corStatus = '#fbbf24'; 
-                            
-                            tbody.innerHTML += \`
-                                <tr>
-                                    <td>\${dataFormatada}</td>
-                                    <td style="font-weight: bold;">\${v.maquina}</td>
-                                    <td style="color: #047857; font-weight: bold;">\${valorFormatado}</td>
-                                    <td style="font-size: 12px; font-weight: bold;">\${iconePgto}</td>
-                                    <td style="color: \${corStatus}; font-size: 12px; font-weight: 500;">\${v.status_liberacao || 'Consumido ✅'}</td>
-                                </tr>
-                            \`;
-                        });
-                    }
-                    document.getElementById('faturamento-hoje').innerText = 'R$ ' + faturamentoGlobalHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+                    
                     document.getElementById('maquinas-online-count').innerText = qtdMaquinasOnline;
-                    grafico.data.labels = Object.keys(vendasGlobalPorDia).slice(-7); 
-                    grafico.data.datasets[0].data = Object.values(vendasGlobalPorDia).slice(-7);
-                    grafico.update();
-                });
+                }
 
                 db.ref('/Vinculos-Caixas').on('value', snap => {
                     const tbody = document.getElementById('lista-vinculos'); tbody.innerHTML = '';
@@ -532,4 +610,4 @@ app.get('/painel', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Servidor Online - Dashboard Otimizada!"));
+app.listen(PORT, () => console.log("Servidor Online - Dashboard Mensal!"));
