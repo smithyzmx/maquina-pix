@@ -177,7 +177,6 @@
     </div>
 
     <script>
-        // Inteligência para ler URL e mostrar abas e alertas (Substitui o código de servidor)
         document.addEventListener('DOMContentLoaded', () => {
             const params = new URLSearchParams(window.location.search);
             const aba = params.get('aba');
@@ -200,7 +199,6 @@
                     const mainEl = document.getElementById('main-content');
                     mainEl.insertBefore(alertDiv, mainEl.firstChild);
                     
-                    // Limpa a URL para o alerta não voltar se atualizar a página
                     window.history.replaceState({}, document.title, "/painel" + (aba ? "?aba=" + aba : ""));
                 }
             }
@@ -301,8 +299,17 @@
             document.getElementById('faturamento-hoje').innerText = 'R$ ' + faturamentoHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
             document.getElementById('faturamento-mes').innerText = 'R$ ' + faturamentoMes.toLocaleString('pt-BR', {minimumFractionDigits: 2});
 
-            grafico.data.labels = Object.keys(vendasPorDia).map(dia => dia + '/' + (mesFiltro + 1).toString().padStart(2, '0'));
-            grafico.data.datasets[0].data = Object.values(vendasPorDia);
+            // CORREÇÃO: Forçar a montagem dos eixos (X) exatamente na ordem de 1 até o fim do mês
+            const labelsOrdenadas = [];
+            const dadosOrdenados = [];
+            for (let i = 1; i <= diasNoMes; i++) {
+                const diaStr = i.toString().padStart(2, '0');
+                labelsOrdenadas.push(diaStr + '/' + (mesFiltro + 1).toString().padStart(2, '0'));
+                dadosOrdenados.push(vendasPorDia[diaStr]);
+            }
+            
+            grafico.data.labels = labelsOrdenadas;
+            grafico.data.datasets[0].data = dadosOrdenados;
             grafico.update();
 
             vendasFiltradas.sort((a, b) => b.data - a.data);
