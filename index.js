@@ -198,6 +198,17 @@ app.all('/webhook-manual', async (req, res) => {
     res.send("OK");
 });
 
+// Rota segura para salvar o apelido da máquina
+app.get('/salvar-apelido', (req, res) => {
+    const maquina = req.query.maquina;
+    const apelido = req.query.apelido;
+    
+    // Use a variável de banco de dados do seu backend (db.ref ou admin.database().ref)
+    db.ref('/Vending-Machines/' + maquina + '/configuracoes/apelido').set(apelido)
+        .then(() => res.sendStatus(200))
+        .catch(err => res.status(500).send(err));
+});
+
 // ==========================================
 // ENTREGA DO FRONT-END
 // ==========================================
