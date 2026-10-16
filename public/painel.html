@@ -76,52 +76,60 @@
 
     <main class="main" id="main-content">
         <div id="view-dashboard" class="view-section active">
+            
+            <!-- NOVA BARRA DE FILTROS AQUI -->
+            <div class="card" style="padding: 15px 25px; margin-bottom: 20px;">
+                <h2 style="margin-bottom: 10px; font-size: 14px; color: var(--text-muted);">Filtros do Painel</h2>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <select id="filtro-maquina" class="form-input" style="margin:0; padding: 8px; font-weight: bold; flex: 1; min-width: 200px; border-color: var(--blue); color: var(--blue);">
+                        <option value="TODAS">🌍 Todas as Máquinas (Geral)</option>
+                    </select>
+                    <select id="filtro-mes" class="form-input" style="margin:0; padding: 8px; font-weight: bold; width: auto; min-width: 120px;">
+                        <option value="0">Janeiro</option>
+                        <option value="1">Fevereiro</option>
+                        <option value="2">Março</option>
+                        <option value="3">Abril</option>
+                        <option value="4">Maio</option>
+                        <option value="5">Junho</option>
+                        <option value="6">Julho</option>
+                        <option value="7">Agosto</option>
+                        <option value="8">Setembro</option>
+                        <option value="9">Outubro</option>
+                        <option value="10">Novembro</option>
+                        <option value="11">Dezembro</option>
+                    </select>
+                    <select id="filtro-ano" class="form-input" style="margin:0; padding: 8px; font-weight: bold; width: auto; min-width: 100px;">
+                        <option value="2025">2025</option>
+                        <option value="2026">2026</option>
+                        <option value="2027">2027</option>
+                    </select>
+                </div>
+            </div>
+
             <div class="grid-top">
                 <div class="card">
                     <h2>Faturamento Hoje</h2>
                     <h1 id="faturamento-hoje" style="font-size: 32px; margin: 10px 0; color: #10b981;">R$ 0,00</h1>
-                    <p style="color: var(--text-muted); font-size: 14px;">Em toda a rede hoje</p>
+                    <p style="color: var(--text-muted); font-size: 14px;">Conforme o filtro acima</p>
                     
                     <hr style="margin: 20px 0;">
-                    <p style="color: var(--text-muted); font-size: 14px; margin: 0;">Máquinas Online: <span id="maquinas-online-count" style="font-weight: bold; color: #03543f; font-size: 18px;">0</span></p>
+                    <p style="color: var(--text-muted); font-size: 14px; margin: 0;">Máquinas Online Agora: <span id="maquinas-online-count" style="font-weight: bold; color: #03543f; font-size: 18px;">0</span></p>
                 </div>
 
                 <div class="card">
-                    <h2>Faturamento Mensal</h2>
-                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                        <select id="filtro-mes" class="form-input" style="margin:0; padding: 8px; font-weight: bold; width: auto;">
-                            <option value="0">Janeiro</option>
-                            <option value="1">Fevereiro</option>
-                            <option value="2">Março</option>
-                            <option value="3">Abril</option>
-                            <option value="4">Maio</option>
-                            <option value="5">Junho</option>
-                            <option value="6">Julho</option>
-                            <option value="7">Agosto</option>
-                            <option value="8">Setembro</option>
-                            <option value="9">Outubro</option>
-                            <option value="10">Novembro</option>
-                            <option value="11">Dezembro</option>
-                        </select>
-                        <select id="filtro-ano" class="form-input" style="margin:0; padding: 8px; font-weight: bold; width: auto;">
-                            <option value="2025">2025</option>
-                            <option value="2026">2026</option>
-                            <option value="2027">2027</option>
-                        </select>
-                    </div>
-                    
+                    <h2>Faturamento no Mês</h2>
                     <h1 id="faturamento-mes" style="font-size: 32px; margin: 10px 0; color: var(--blue);">R$ 0,00</h1>
-                    <p style="color: var(--text-muted); font-size: 14px;">Total no período acima</p>
+                    <p style="color: var(--text-muted); font-size: 14px;">Conforme o filtro acima</p>
                 </div>
 
                 <div class="card">
-                    <h2>Evolução no Mês</h2>
+                    <h2>Evolução Mensal</h2>
                     <div class="chart-container"><canvas id="graficoFaturamento"></canvas></div>
                 </div>
             </div>
             
             <div class="card">
-                <h2>💰 Todos os Pagamentos do Mês</h2>
+                <h2>💰 Histórico de Pagamentos</h2>
                 <div class="tabela-wrapper">
                     <table class="tabela-historico">
                         <thead><tr><th>Data</th><th>Máquina</th><th>Valor</th><th>Método</th><th>Status</th></tr></thead>
@@ -248,20 +256,42 @@
         document.getElementById('filtro-mes').value = dataHoje.getMonth();
         document.getElementById('filtro-ano').value = dataHoje.getFullYear();
 
+        // Agora o painel reage se mudar o mês, ano OU a máquina
         document.getElementById('filtro-mes').addEventListener('change', processarDashboard);
         document.getElementById('filtro-ano').addEventListener('change', processarDashboard);
+        document.getElementById('filtro-maquina').addEventListener('change', processarDashboard);
 
         db.ref('/Vending-Machines').on('value', snap => {
             dadosOriginais = snap.val() || {};
+            atualizarListaDeFiltros();
             processarMaquinas();
             processarDashboard();
         });
+
+        // Função para preencher o select com os nomes das máquinas que existem no banco
+        function atualizarListaDeFiltros() {
+            if(!dadosOriginais) return;
+            const select = document.getElementById('filtro-maquina');
+            const maquinaSelecionada = select.value;
+            
+            select.innerHTML = '<option value="TODAS">🌍 Todas as Máquinas (Geral)</option>';
+            
+            Object.keys(dadosOriginais).forEach(id => {
+                select.innerHTML += `<option value="${id}">🕹️ ${id}</option>`;
+            });
+
+            // Se a máquina que o usuário estava a olhar ainda existir, mantém ela selecionada
+            if (dadosOriginais[maquinaSelecionada] || maquinaSelecionada === 'TODAS') {
+                select.value = maquinaSelecionada;
+            }
+        }
 
         function processarDashboard() {
             if(!dadosOriginais) return;
 
             const mesFiltro = parseInt(document.getElementById('filtro-mes').value);
             const anoFiltro = parseInt(document.getElementById('filtro-ano').value);
+            const maquinaFiltro = document.getElementById('filtro-maquina').value;
 
             let faturamentoMes = 0;
             let faturamentoHoje = 0;
@@ -276,6 +306,9 @@
             }
 
             Object.keys(dadosOriginais).forEach(idMaquina => {
+                // A MÁGICA ACONTECE AQUI: Pula a máquina se ela não for a que está no filtro
+                if (maquinaFiltro !== 'TODAS' && idMaquina !== maquinaFiltro) return;
+
                 const maq = dadosOriginais[idMaquina];
                 if (maq.historico_vendas) {
                     Object.values(maq.historico_vendas).forEach(v => {
@@ -299,7 +332,6 @@
             document.getElementById('faturamento-hoje').innerText = 'R$ ' + faturamentoHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
             document.getElementById('faturamento-mes').innerText = 'R$ ' + faturamentoMes.toLocaleString('pt-BR', {minimumFractionDigits: 2});
 
-            // CORREÇÃO: Forçar a montagem dos eixos (X) exatamente na ordem de 1 até o fim do mês
             const labelsOrdenadas = [];
             const dadosOrdenados = [];
             for (let i = 1; i <= diasNoMes; i++) {
@@ -310,6 +342,9 @@
             
             grafico.data.labels = labelsOrdenadas;
             grafico.data.datasets[0].data = dadosOrdenados;
+            
+            // Muda o nome da barrinha do gráfico para ficar claro o que você está a ver
+            grafico.data.datasets[0].label = maquinaFiltro === 'TODAS' ? 'Faturamento Global Diário (R$)' : `Faturamento da ${maquinaFiltro} (R$)`;
             grafico.update();
 
             vendasFiltradas.sort((a, b) => b.data - a.data);
@@ -317,7 +352,7 @@
             tbody.innerHTML = ''; 
             
             if (vendasFiltradas.length === 0) { 
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af; padding: 30px 0;">Sem pagamentos neste período.</td></tr>'; 
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af; padding: 30px 0;">Nenhum pagamento encontrado para este filtro.</td></tr>'; 
             } else {
                 vendasFiltradas.forEach(v => {
                     const dataFormatada = new Date(v.data).toLocaleString('pt-BR');
@@ -438,4 +473,3 @@
     </script>
 </body>
 </html>
-
