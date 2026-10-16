@@ -77,7 +77,6 @@
     <main class="main" id="main-content">
         <div id="view-dashboard" class="view-section active">
             
-            <!-- NOVA BARRA DE FILTROS AQUI -->
             <div class="card" style="padding: 15px 25px; margin-bottom: 20px;">
                 <h2 style="margin-bottom: 10px; font-size: 14px; color: var(--text-muted);">Filtros do Painel</h2>
                 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
@@ -256,7 +255,6 @@
         document.getElementById('filtro-mes').value = dataHoje.getMonth();
         document.getElementById('filtro-ano').value = dataHoje.getFullYear();
 
-        // Agora o painel reage se mudar o mês, ano OU a máquina
         document.getElementById('filtro-mes').addEventListener('change', processarDashboard);
         document.getElementById('filtro-ano').addEventListener('change', processarDashboard);
         document.getElementById('filtro-maquina').addEventListener('change', processarDashboard);
@@ -268,7 +266,6 @@
             processarDashboard();
         });
 
-        // Função para preencher o select com os nomes das máquinas que existem no banco
         function atualizarListaDeFiltros() {
             if(!dadosOriginais) return;
             const select = document.getElementById('filtro-maquina');
@@ -277,10 +274,11 @@
             select.innerHTML = '<option value="TODAS">🌍 Todas as Máquinas (Geral)</option>';
             
             Object.keys(dadosOriginais).forEach(id => {
-                select.innerHTML += `<option value="${id}">🕹️ ${id}</option>`;
+                const apelido = dadosOriginais[id].configuracoes?.apelido;
+                const nomeExibicao = apelido ? `${apelido} (${id})` : id;
+                select.innerHTML += `<option value="${id}">🕹️ ${nomeExibicao}</option>`;
             });
 
-            // Se a máquina que o usuário estava a olhar ainda existir, mantém ela selecionada
             if (dadosOriginais[maquinaSelecionada] || maquinaSelecionada === 'TODAS') {
                 select.value = maquinaSelecionada;
             }
@@ -306,7 +304,6 @@
             }
 
             Object.keys(dadosOriginais).forEach(idMaquina => {
-                // A MÁGICA ACONTECE AQUI: Pula a máquina se ela não for a que está no filtro
                 if (maquinaFiltro !== 'TODAS' && idMaquina !== maquinaFiltro) return;
 
                 const maq = dadosOriginais[idMaquina];
@@ -343,7 +340,6 @@
             grafico.data.labels = labelsOrdenadas;
             grafico.data.datasets[0].data = dadosOrdenados;
             
-            // Muda o nome da barrinha do gráfico para ficar claro o que você está a ver
             grafico.data.datasets[0].label = maquinaFiltro === 'TODAS' ? 'Faturamento Global Diário (R$)' : `Faturamento da ${maquinaFiltro} (R$)`;
             grafico.update();
 
@@ -359,6 +355,9 @@
                     const valorFormatado = 'R$ ' + v.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2});
                     const iconePgto = v.metodo === 'CARTÃO' ? '💳 Cartão' : '🪙 PIX';
                     
+                    const apelido = dadosOriginais[v.maquina]?.configuracoes?.apelido;
+                    const nomeExibicao = apelido ? apelido : v.maquina;
+                    
                     let corStatus = '#10b981'; 
                     if (v.status_liberacao && v.status_liberacao.includes('Offline')) corStatus = '#ef4444'; 
                     else if (v.status_liberacao && v.status_liberacao.includes('Aguardando')) corStatus = '#fbbf24'; 
@@ -366,7 +365,7 @@
                     tbody.innerHTML += `
                         <tr>
                             <td>${dataFormatada}</td>
-                            <td style="font-weight: bold;">${v.maquina}</td>
+                            <td style="font-weight: bold;">${nomeExibicao}</td>
                             <td style="color: #047857; font-weight: bold;">${valorFormatado}</td>
                             <td style="font-size: 12px; font-weight: bold;">${iconePgto}</td>
                             <td style="color: ${corStatus}; font-size: 12px; font-weight: 500;">${v.status_liberacao || 'Consumido ✅'}</td>
@@ -397,6 +396,9 @@
                 const pausa = dados.configuracoes?.tempo_pausa_ms || 400;
                 const bonus_valor = dados.configuracoes?.bonus_valor || 0;
                 const bonus_pulsos = dados.configuracoes?.bonus_pulsos || 0;
+                
+                const apelido = dados.configuracoes?.apelido || '';
+                const tituloMaquina = apelido ? `${apelido} <span style="font-size:12px; color:gray;">(${idDaMaquina})</span>` : idDaMaquina;
 
                 const rede = dados.rede || {};
                 let ssid = rede.ssid || 'Desconhecido';
@@ -413,7 +415,7 @@
                 const cardHtml = `
                     <div class="card" style="margin-bottom: 0;">
                         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
-                            <div><h3 style="margin: 0; font-size: 16px; color: #111827;">🕹️ ${idDaMaquina}</h3></div>
+                            <div><h3 style="margin: 0; font-size: 16px; color: #111827;">🕹️ ${tituloMaquina}</h3></div>
                             <div style="display: flex; gap: 10px; align-items: center;">
                                 ${statusHtml}
                                 <form action="/deletar-maquina" method="POST" style="margin: 0;"><input type="hidden" name="maquina" value="${idDaMaquina}"><button type="submit" onclick="return confirm('Tem certeza? A máquina será removida da lista.');" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 16px;">🗑️</button></form>
@@ -428,6 +430,14 @@
 
                         <hr style="margin: 15px 0;">
                         
+                        <div style="margin: 15px 0;">
+                            <label style="font-size:10px; font-weight:bold; color:var(--blue);">Nome do Local (Apelido)</label>
+                            <div style="display:flex; gap:5px; margin-top:4px;">
+                                <input type="text" id="apelido-${idDaMaquina}" class="form-input" value="${apelido}" placeholder="Ex: Shopping Centro" style="margin:0;">
+                                <button onclick="salvarApelido('${idDaMaquina}')" style="background:var(--blue); color:white; border:none; border-radius:6px; padding:0 15px; cursor:pointer; font-weight:bold;">Salvar</button>
+                            </div>
+                        </div>
+
                         <div style="display: flex; margin-bottom: 15px;">
                             <button onclick="abrirModal('${idDaMaquina}')" style="width: 100%; padding: 12px; background: #fff; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: bold; color: #374151; font-size: 14px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">🎟️ Enviar Ficha Grátis</button>
                         </div>
@@ -470,6 +480,14 @@
                 <td><form action="/desvincular-caixa" method="POST" style="margin:0;"><input type="hidden" name="pos_id" value="${v.key}"><button type="submit" class="btn-danger">Desvincular</button></form></td></tr>`;
             });
         });
+
+        // NOVO: Função para salvar o apelido no Firebase
+        function salvarApelido(idMaquina) {
+            const novoApelido = document.getElementById('apelido-' + idMaquina).value;
+            db.ref('/Vending-Machines/' + idMaquina + '/configuracoes/apelido').set(novoApelido)
+                .then(() => alert('Nome do local salvo com sucesso!'))
+                .catch(erro => alert('Erro ao salvar: ' + erro));
+        }
     </script>
 </body>
 </html>
