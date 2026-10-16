@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Painel - Controle de Gruas</title>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script> <!-- 🔑 NOVO: Biblioteca de Login -->
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -238,10 +239,22 @@
             });
         }
 
-        const firebaseConfig = { databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" };
+        // =========================================================================
+        // 🔑 NOVO: AUTENTICAÇÃO DO PAINEL (Para ter permissão de Salvar Apelidos)
+        // =========================================================================
+        const firebaseConfig = { 
+            apiKey: "AIzaSyB-um5ht5gY4dgHykwqmlT6vq-emJl6CXw", // Mesma chave das ESPs
+            databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" 
+        };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
         
+        // Faz o login silencioso no painel para ganhar permissão de administrador
+        firebase.auth().signInWithEmailAndPassword("maquinas@play4plush.com", "jepobu12")
+            .then(() => console.log("✅ Painel autenticado e com permissão de escrita!"))
+            .catch(erro => console.error("❌ Erro ao autenticar:", erro));
+        // =========================================================================
+
         const ctx = document.getElementById('graficoFaturamento').getContext('2d');
         let grafico = new Chart(ctx, { 
             type: 'bar', 
@@ -481,12 +494,11 @@
             });
         });
 
-        // NOVO: Função para salvar o apelido no Firebase
         function salvarApelido(idMaquina) {
             const novoApelido = document.getElementById('apelido-' + idMaquina).value;
             db.ref('/Vending-Machines/' + idMaquina + '/configuracoes/apelido').set(novoApelido)
                 .then(() => alert('Nome do local salvo com sucesso!'))
-                .catch(erro => alert('Erro ao salvar: ' + erro));
+                .catch(erro => alert('Erro ao salvar: ' + erro.message));
         }
     </script>
 </body>
