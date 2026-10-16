@@ -239,18 +239,9 @@
             });
         }
 
-        // =========================================================================
-        // 🔑 NOVO: AUTENTICAÇÃO DO PAINEL (Para ter permissão de Salvar Apelidos)
-        // =========================================================================
-        const firebaseConfig = { 
-            apiKey: "AIzaSyB-um5ht5gY4dgHykwqmlT6vq-emJl6CXw", // Mesma chave das ESPs
-            databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" 
-        };
+        const firebaseConfig = { databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
-        
-        // Faz o login silencioso no painel para ganhar permissão de administrador
-        firebase.auth().signInWithEmailAndPassword("maquinas@play4plush.com", "jepobu12")
             .then(() => console.log("✅ Painel autenticado e com permissão de escrita!"))
             .catch(erro => console.error("❌ Erro ao autenticar:", erro));
         // =========================================================================
@@ -496,10 +487,12 @@
 
         function salvarApelido(idMaquina) {
             const novoApelido = document.getElementById('apelido-' + idMaquina).value;
-            db.ref('/Vending-Machines/' + idMaquina + '/configuracoes/apelido').set(novoApelido)
+    
+            // Chama o back-end (Render) para fazer o trabalho pesado e seguro
+            fetch('/salvar-apelido?maquina=' + idMaquina + '&apelido=' + encodeURIComponent(novoApelido))
                 .then(() => alert('Nome do local salvo com sucesso!'))
                 .catch(erro => alert('Erro ao salvar: ' + erro.message));
-        }
+}
     </script>
 </body>
 </html>
