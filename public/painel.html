@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Painel - Controle de Gruas</title>
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script> <!-- 🔑 NOVO: Biblioteca de Login -->
     <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -239,12 +238,13 @@
             });
         }
 
-        const firebaseConfig = { databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" };
+        // Configuração Corrigida com a Chave Pública
+        const firebaseConfig = { 
+            apiKey: "AIzaSyB-um5ht5gY4dgHykwqmlT6vq-emJl6CXw",
+            databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" 
+        };
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
-            .then(() => console.log("✅ Painel autenticado e com permissão de escrita!"))
-            .catch(erro => console.error("❌ Erro ao autenticar:", erro));
-        // =========================================================================
 
         const ctx = document.getElementById('graficoFaturamento').getContext('2d');
         let grafico = new Chart(ctx, { 
@@ -492,7 +492,7 @@
             fetch('/salvar-apelido?maquina=' + idMaquina + '&apelido=' + encodeURIComponent(novoApelido))
                 .then(() => alert('Nome do local salvo com sucesso!'))
                 .catch(erro => alert('Erro ao salvar: ' + erro.message));
-}
+        }
     </script>
 </body>
 </html>
