@@ -239,10 +239,13 @@
         }
 
         // Configuração Corrigida com a Chave Pública
-        const firebaseConfig = { 
+        const firebaseConfig = {              
             apiKey: "AIzaSyB-um5ht5gY4dgHykwqmlT6vq-emJl6CXw",
+            authDomain: "maquinapelucia-222e9.firebaseapp.com",
+            projectId: "maquinapelucia-222e9",
             databaseURL: "https://maquinapelucia-222e9-default-rtdb.firebaseio.com" 
         };
+
         firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
 
