@@ -27,6 +27,42 @@ try {
 const db = admin.database();
 
 // ==========================================
+// 📲 SISTEMA DE ALERTA NO TELEGRAM (NOVO)
+// ==========================================
+async function avisarNoTelegram(maquinaID, historyKey) {
+    const token = "9088179478:AAG1PyOXEQxLjhAZPWW_7bvMenO_seNrgM0";
+    const chat_id = "453736049";
+    const hora = new Date().toLocaleString("pt-BR", { timeZone: "America/Recife" });
+
+    try {
+        // Puxa o apelido da máquina (ex: Shopping X)
+        const snapApelido = await db.ref(`/Vending-Machines/${maquinaID}/configuracoes/apelido`).once('value');
+        const apelido = snapApelido.val() ? snapApelido.val() : maquinaID;
+
+        // Puxa o valor em Reais que o cliente pagou direto do histórico
+        let valorTexto = "Desconhecido";
+        if (historyKey) {
+            const snapHistorico = await db.ref(`/Vending-Machines/${maquinaID}/historico_vendas/${historyKey}/valor`).once('value');
+            if (snapHistorico.exists()) {
+                valorTexto = parseFloat(snapHistorico.val()).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+            }
+        }
+
+        const texto = `🚨 *FALHA DE COMUNICAÇÃO (OFFLINE)* 🚨\n\n🕹️ *Local:* ${apelido}\n💰 *Valor Pago:* R$ ${valorTexto}\n🕒 *Hora:* ${hora}\n\n_O PIX foi aprovado, mas a máquina não puxou o crédito em 60s. O cliente está sem a jogada!_`;
+
+        // Usa o Axios para enviar a mensagem direto para o seu celular
+        await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+            chat_id: chat_id,
+            text: texto,
+            parse_mode: "Markdown"
+        });
+        console.log(`📱 Alerta do Telegram enviado com sucesso para ${apelido}`);
+    } catch (err) {
+        console.error("Erro ao enviar Telegram:", err.message);
+    }
+}
+
+// ==========================================
 // 🧠 SISTEMA DE CONFIRMAÇÃO DE DUPLA VIA
 // ==========================================
 async function liberarCredito(maquinaID, pulsos, historyKey = null) {
@@ -49,6 +85,9 @@ async function liberarCredito(maquinaID, pulsos, historyKey = null) {
                     await db.ref(`Vending-Machines/${maquinaID}/historico_vendas/${historyKey}`).update({
                         status_liberacao: 'Expirado (Offline) ❌'
                     });
+                    
+                    // 🔔 GATILHO DO TELEGRAM: Dispara aqui, quando confirma a expiração!
+                    avisarNoTelegram(maquinaID, historyKey);
                 }
             } else {
                 if (historyKey) {
@@ -203,7 +242,6 @@ app.get('/salvar-apelido', (req, res) => {
     const maquina = req.query.maquina;
     const apelido = req.query.apelido;
     
-    // Use a variável de banco de dados do seu backend (db.ref ou admin.database().ref)
     db.ref('/Vending-Machines/' + maquina + '/configuracoes/apelido').set(apelido)
         .then(() => res.sendStatus(200))
         .catch(err => res.status(500).send(err));
