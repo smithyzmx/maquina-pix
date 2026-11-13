@@ -27,7 +27,7 @@ try {
 const db = admin.database();
 
 // ==========================================
-// 📲 SISTEMA DE ALERTA NO TELEGRAM (NOVO)
+// 📲 SISTEMA DE ALERTA NO TELEGRAM
 // ==========================================
 async function avisarNoTelegram(maquinaID, historyKey) {
     const token = "9088179478:AAG1PyOXEQxLjhAZPWW_7bvMenO_seNrgM0";
@@ -35,37 +35,38 @@ async function avisarNoTelegram(maquinaID, historyKey) {
     const hora = new Date().toLocaleString("pt-BR", { timeZone: "America/Recife" });
 
     try {
-        // Puxa o apelido da máquina (ex: Shopping X)
         const snapApelido = await db.ref(`/Vending-Machines/${maquinaID}/configuracoes/apelido`).once('value');
         const apelido = snapApelido.val() ? snapApelido.val() : maquinaID;
 
-        // Puxa o valor em Reais que o cliente pagou direto do histórico
         let valorTexto = "Desconhecido";
+        let statusTexto = "Expirado";
         if (historyKey) {
-            const snapHistorico = await db.ref(`/Vending-Machines/${maquinaID}/historico_vendas/${historyKey}/valor`).once('value');
+            const snapHistorico = await db.ref(`/Vending-Machines/${maquinaID}/historico_vendas/${historyKey}`).once('value');
             if (snapHistorico.exists()) {
-                valorTexto = parseFloat(snapHistorico.val()).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                const dadosHist = snapHistorico.val();
+                valorTexto = parseFloat(dadosHist.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+                statusTexto = dadosHist.status_liberacao;
             }
         }
 
-        const texto = `🚨 *FALHA DE COMUNICAÇÃO (OFFLINE)* 🚨\n\n🕹️ *Local:* ${apelido}\n💰 *Valor Pago:* R$ ${valorTexto}\n🕒 *Hora:* ${hora}\n\n_O PIX foi aprovado, mas a máquina não puxou o crédito em 60s. O cliente está sem a jogada!_`;
+        const texto = `🚨 *FALHA DE MÁQUINA (OFFLINE)* 🚨\n\n🕹️ *Local:* ${apelido}\n💰 *Valor:* R$ ${valorTexto}\n🔄 *Ação Tomada:* ${statusTexto}\n🕒 *Hora:* ${hora}\n\n_O PIX foi pago, mas a máquina não atracou em 60s. O sistema agiu de forma automática!_`;
 
-        // Usa o Axios para enviar a mensagem direto para o seu celular
         await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
             chat_id: chat_id,
             text: texto,
             parse_mode: "Markdown"
         });
-        console.log(`📱 Alerta do Telegram enviado com sucesso para ${apelido}`);
+        console.log(`📱 Alerta enviado com sucesso para ${apelido}`);
     } catch (err) {
         console.error("Erro ao enviar Telegram:", err.message);
     }
 }
 
 // ==========================================
-// 🧠 SISTEMA DE CONFIRMAÇÃO DE DUPLA VIA
+// 🧠 CONFIRMAÇÃO DE DUPLA VIA & ESTORNO
 // ==========================================
-async function liberarCredito(maquinaID, pulsos, historyKey = null) {
+// Adicionámos o 'paymentId' na função para sabermos quem devemos reembolsar
+async function liberarCredito(maquinaID, pulsos, historyKey = null, paymentId = null) {
     const ref = db.ref(`Vending-Machines/${maquinaID}`);
     try {
         await ref.update({
@@ -82,11 +83,32 @@ async function liberarCredito(maquinaID, pulsos, historyKey = null) {
                 console.log(`❌ TIMEOUT: ${maquinaID} offline. Fila zerada.`);
                 
                 if (historyKey) {
+                    let statusFinal = 'Expirado (Offline) ❌';
+
+                    // 💸 ROTINA DE ESTORNO AUTOMÁTICO (MERCADO PAGO)
+                    if (paymentId) {
+                        try {
+                            const chaveUnica = `${paymentId}-${Date.now()}`; // UUID exigido pela API
+                            await axios.post(`https://api.mercadopago.com/v1/payments/${paymentId}/refunds`, {}, {
+                                headers: {
+                                    'Authorization': `Bearer ${process.env.MP_TOKEN}`,
+                                    'Content-Type': 'application/json',
+                                    'X-Idempotency-Key': chaveUnica
+                                }
+                            });
+                            console.log(`💸 ESTORNO EFETUADO: O dinheiro do ID ${paymentId} foi devolvido ao cliente!`);
+                            statusFinal = 'Estornado (Offline) ↩️';
+                        } catch (refundError) {
+                            console.error("⚠️ Falha ao tentar estornar PIX:", refundError.response?.data || refundError.message);
+                            statusFinal = 'Falha no Estorno ⚠️';
+                        }
+                    }
+
                     await db.ref(`Vending-Machines/${maquinaID}/historico_vendas/${historyKey}`).update({
-                        status_liberacao: 'Expirado (Offline) ❌'
+                        status_liberacao: statusFinal
                     });
                     
-                    // 🔔 GATILHO DO TELEGRAM: Dispara aqui, quando confirma a expiração!
+                    // Dispara o Telegram com o resultado do estorno
                     avisarNoTelegram(maquinaID, historyKey);
                 }
             } else {
@@ -184,7 +206,8 @@ app.post('/webhook', async (req, res) => {
                         console.log(`🎁 BÔNUS APLICADO: +${pulsosExtra} jogadas grátis para ${maquinaID}!`);
                     }
 
-                    liberarCredito(maquinaID, pulsosFinais, historyRef.key);
+                    // 👉 Enviamos o paymentId também, para a máquina saber o que estornar se falhar
+                    liberarCredito(maquinaID, pulsosFinais, historyRef.key, paymentId);
                 }
             }
         } catch (error) {
@@ -233,11 +256,11 @@ app.post('/deletar-maquina', async (req, res) => {
 });
 
 app.all('/webhook-manual', async (req, res) => {
-    liberarCredito(req.query.maquina || "Maquina-01", parseInt(req.query.pulsos) || 1);
+    // Como é manual (Ficha Grátis), não enviamos o paymentId, logo não tem estorno de dinheiro falso.
+    liberarCredito(req.query.maquina || "Maquina-01", parseInt(req.query.pulsos) || 1, null, null);
     res.send("OK");
 });
 
-// Rota segura para salvar o apelido da máquina
 app.get('/salvar-apelido', (req, res) => {
     const maquina = req.query.maquina;
     const apelido = req.query.apelido;
