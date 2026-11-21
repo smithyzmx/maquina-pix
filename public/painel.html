@@ -317,21 +317,86 @@
                 if (maq.historico_vendas) {
                     Object.values(maq.historico_vendas).forEach(v => {
                         const dataVenda = new Date(v.data);
+                        const statusTexto = (v.status_liberacao || '').toLowerCase();
+                        const foiCancelado = statusTexto.includes('estornado') || statusTexto.includes('cancelado');
                         
-                        if (dataVenda.toLocaleDateString('pt-BR') === strHoje) {
+                        // Só entra no faturamento de hoje se não foi estornado/cancelado
+                        if (!foiCancelado && dataVenda.toLocaleDateString('pt-BR') === strHoje) {
                             faturamentoHoje += v.valor;
                         }
 
                         if (dataVenda.getMonth() === mesFiltro && dataVenda.getFullYear() === anoFiltro) {
-                            faturamentoMes += v.valor;
+                            // Mantém na lista para histórico/auditoria
                             vendasFiltradas.push({ maquina: idMaquina, ...v });
                             
-                            const diaString = dataVenda.getDate().toString().padStart(2, '0');
-                            vendasPorDia[diaString] += v.valor;
+                            // Só entra no mês e no gráfico se não foi estornado/cancelado
+                            if (!foiCancelado) {
+                                faturamentoMes += v.valor;
+                                const diaString = dataVenda.getDate().toString().padStart(2, '0');
+                                vendasPorDia[diaString] += v.valor;
+                            }
                         }
                     });
                 }
             });
+
+            document.getElementById('faturamento-hoje').innerText = 'R$ ' + faturamentoHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+            document.getElementById('faturamento-mes').innerText = 'R$ ' + faturamentoMes.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+
+            const labelsOrdenadas = [];
+            const dadosOrdenados = [];
+            for (let i = 1; i <= diasNoMes; i++) {
+                const diaStr = i.toString().padStart(2, '0');
+                labelsOrdenadas.push(diaStr + '/' + (mesFiltro + 1).toString().padStart(2, '0'));
+                dadosOrdenados.push(vendasPorDia[diaStr]);
+            }
+            
+            grafico.data.labels = labelsOrdenadas;
+            grafico.data.datasets[0].data = dadosOrdenados;
+            
+            const apelidoFiltro = dadosOriginais[maquinaFiltro]?.configuracoes?.apelido;
+            const nomeGrafico = apelidoFiltro ? apelidoFiltro : maquinaFiltro;
+            grafico.data.datasets[0].label = maquinaFiltro === 'TODAS' ? 'Faturamento Global Diário (R$)' : `Faturamento - ${nomeGrafico} (R$)`;
+            grafico.update();
+
+            vendasFiltradas.sort((a, b) => b.data - a.data);
+            const tbody = document.getElementById('lista-pagamentos');
+            tbody.innerHTML = ''; 
+            
+            if (vendasFiltradas.length === 0) { 
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af; padding: 30px 0;">Nenhum pagamento encontrado para este filtro.</td></tr>'; 
+            } else {
+                vendasFiltradas.forEach(v => {
+                    const dataFormatada = new Date(v.data).toLocaleString('pt-BR');
+                    const valorFormatado = 'R$ ' + v.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+                    const iconePgto = v.metodo === 'CARTÃO' ? '💳 Cartão' : '🪙 PIX';
+                    
+                    const apelido = dadosOriginais[v.maquina]?.configuracoes?.apelido;
+                    const nomeExibicao = apelido ? apelido : v.maquina;
+                    
+                    const statusTexto = (v.status_liberacao || '').toLowerCase();
+                    const foiCancelado = statusTexto.includes('estornado') || statusTexto.includes('cancelado');
+
+                    let corStatus = '#10b981'; 
+                    if (foiCancelado || statusTexto.includes('offline') || statusTexto.includes('falha')) corStatus = '#ef4444'; 
+                    else if (statusTexto.includes('aguardando') || statusTexto.includes('retido')) corStatus = '#f59e0b'; 
+                    
+                    const estiloValor = foiCancelado 
+                        ? 'color: #9ca3af; text-decoration: line-through; font-weight: bold;' 
+                        : 'color: #047857; font-weight: bold;';
+                    
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${dataFormatada}</td>
+                            <td style="font-weight: bold;">${nomeExibicao}</td>
+                            <td style="${estiloValor}">${valorFormatado}</td>
+                            <td style="font-size: 12px; font-weight: bold;">${iconePgto}</td>
+                            <td style="color: ${corStatus}; font-size: 12px; font-weight: 500;">${v.status_liberacao || 'Consumido ✅'}</td>
+                        </tr>
+                        `;
+                    });
+                }
+            }
 
             document.getElementById('faturamento-hoje').innerText = 'R$ ' + faturamentoHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
             document.getElementById('faturamento-mes').innerText = 'R$ ' + faturamentoMes.toLocaleString('pt-BR', {minimumFractionDigits: 2});
