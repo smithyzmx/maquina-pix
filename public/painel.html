@@ -238,7 +238,6 @@
             });
         }
 
-        // Configuração Corrigida com a Chave Pública
         const firebaseConfig = {              
             apiKey: "AIzaSyB-um5ht5gY4dgHykwqmlT6vq-emJl6CXw",
             authDomain: "maquinapelucia-222e9.firebaseapp.com",
@@ -291,6 +290,11 @@
             }
         }
 
+        function vendaIgnorada(statusLiberacao) {
+            const statusTexto = String(statusLiberacao || '').toLowerCase();
+            return statusTexto.includes('estornado') || statusTexto.includes('cancelado') || statusTexto.includes('expirado');
+        }
+
         function processarDashboard() {
             if(!dadosOriginais) return;
 
@@ -317,23 +321,20 @@
                 if (maq.historico_vendas) {
                     Object.values(maq.historico_vendas).forEach(v => {
                         const dataVenda = new Date(v.data);
-                        const statusTexto = (v.status_liberacao || '').toLowerCase();
-                        const foiCancelado = statusTexto.includes('estornado') || statusTexto.includes('cancelado');
-                        
-                        // Só entra no faturamento de hoje se não foi estornado/cancelado
-                        if (!foiCancelado && dataVenda.toLocaleDateString('pt-BR') === strHoje) {
-                            faturamentoHoje += v.valor;
+                        const valorNum = parseFloat(v.valor) || 0;
+                        const ignorar = vendaIgnorada(v.status_liberacao);
+
+                        if (!ignorar && dataVenda.toLocaleDateString('pt-BR') === strHoje) {
+                            faturamentoHoje += valorNum;
                         }
 
                         if (dataVenda.getMonth() === mesFiltro && dataVenda.getFullYear() === anoFiltro) {
-                            // Mantém na lista para histórico/auditoria
                             vendasFiltradas.push({ maquina: idMaquina, ...v });
-                            
-                            // Só entra no mês e no gráfico se não foi estornado/cancelado
-                            if (!foiCancelado) {
-                                faturamentoMes += v.valor;
+
+                            if (!ignorar) {
+                                faturamentoMes += valorNum;
                                 const diaString = dataVenda.getDate().toString().padStart(2, '0');
-                                vendasPorDia[diaString] += v.valor;
+                                vendasPorDia[diaString] += valorNum;
                             }
                         }
                     });
@@ -354,8 +355,8 @@
             grafico.data.labels = labelsOrdenadas;
             grafico.data.datasets[0].data = dadosOrdenados;
             
-            const apelidoFiltro = dadosOriginais[maquinaFiltro]?.configuracoes?.apelido;
-            const nomeGrafico = apelidoFiltro ? apelidoFiltro : maquinaFiltro;
+            const apelidoFiltro = maquinaFiltro !== 'TODAS' ? dadosOriginais[maquinaFiltro]?.configuracoes?.apelido : null;
+            const nomeGrafico = apelidoFiltro || maquinaFiltro;
             grafico.data.datasets[0].label = maquinaFiltro === 'TODAS' ? 'Faturamento Global Diário (R$)' : `Faturamento - ${nomeGrafico} (R$)`;
             grafico.update();
 
@@ -368,20 +369,21 @@
             } else {
                 vendasFiltradas.forEach(v => {
                     const dataFormatada = new Date(v.data).toLocaleString('pt-BR');
-                    const valorFormatado = 'R$ ' + v.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2});
+                    const valorNum = parseFloat(v.valor) || 0;
+                    const valorFormatado = 'R$ ' + valorNum.toLocaleString('pt-BR', {minimumFractionDigits: 2});
                     const iconePgto = v.metodo === 'CARTÃO' ? '💳 Cartão' : '🪙 PIX';
                     
                     const apelido = dadosOriginais[v.maquina]?.configuracoes?.apelido;
                     const nomeExibicao = apelido ? apelido : v.maquina;
                     
-                    const statusTexto = (v.status_liberacao || '').toLowerCase();
-                    const foiCancelado = statusTexto.includes('estornado') || statusTexto.includes('cancelado');
+                    const statusTexto = String(v.status_liberacao || '').toLowerCase();
+                    const ignorar = vendaIgnorada(v.status_liberacao);
 
                     let corStatus = '#10b981'; 
-                    if (foiCancelado || statusTexto.includes('offline') || statusTexto.includes('falha')) corStatus = '#ef4444'; 
+                    if (ignorar || statusTexto.includes('offline') || statusTexto.includes('falha')) corStatus = '#ef4444'; 
                     else if (statusTexto.includes('aguardando') || statusTexto.includes('retido')) corStatus = '#f59e0b'; 
                     
-                    const estiloValor = foiCancelado 
+                    const estiloValor = ignorar 
                         ? 'color: #9ca3af; text-decoration: line-through; font-weight: bold;' 
                         : 'color: #047857; font-weight: bold;';
                     
@@ -390,55 +392,6 @@
                             <td>${dataFormatada}</td>
                             <td style="font-weight: bold;">${nomeExibicao}</td>
                             <td style="${estiloValor}">${valorFormatado}</td>
-                            <td style="font-size: 12px; font-weight: bold;">${iconePgto}</td>
-                            <td style="color: ${corStatus}; font-size: 12px; font-weight: 500;">${v.status_liberacao || 'Consumido ✅'}</td>
-                        </tr>
-                        `;
-                    });
-                }
-            }
-
-            document.getElementById('faturamento-hoje').innerText = 'R$ ' + faturamentoHoje.toLocaleString('pt-BR', {minimumFractionDigits: 2});
-            document.getElementById('faturamento-mes').innerText = 'R$ ' + faturamentoMes.toLocaleString('pt-BR', {minimumFractionDigits: 2});
-
-            const labelsOrdenadas = [];
-            const dadosOrdenados = [];
-            for (let i = 1; i <= diasNoMes; i++) {
-                const diaStr = i.toString().padStart(2, '0');
-                labelsOrdenadas.push(diaStr + '/' + (mesFiltro + 1).toString().padStart(2, '0'));
-                dadosOrdenados.push(vendasPorDia[diaStr]);
-            }
-            
-            grafico.data.labels = labelsOrdenadas;
-            grafico.data.datasets[0].data = dadosOrdenados;
-            
-            grafico.data.datasets[0].label = maquinaFiltro === 'TODAS' ? 'Faturamento Global Diário (R$)' : `Faturamento da ${maquinaFiltro} (R$)`;
-            grafico.update();
-
-            vendasFiltradas.sort((a, b) => b.data - a.data);
-            const tbody = document.getElementById('lista-pagamentos');
-            tbody.innerHTML = ''; 
-            
-            if (vendasFiltradas.length === 0) { 
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #9ca3af; padding: 30px 0;">Nenhum pagamento encontrado para este filtro.</td></tr>'; 
-            } else {
-                vendasFiltradas.forEach(v => {
-                    const dataFormatada = new Date(v.data).toLocaleString('pt-BR');
-                    const valorFormatado = 'R$ ' + v.valor.toLocaleString('pt-BR', {minimumFractionDigits: 2});
-                    const iconePgto = v.metodo === 'CARTÃO' ? '💳 Cartão' : '🪙 PIX';
-                    
-                    const apelido = dadosOriginais[v.maquina]?.configuracoes?.apelido;
-                    const nomeExibicao = apelido ? apelido : v.maquina;
-                    
-                    let corStatus = '#10b981'; 
-                    if (v.status_liberacao && v.status_liberacao.includes('Offline')) corStatus = '#ef4444'; 
-                    else if (v.status_liberacao && v.status_liberacao.includes('Aguardando')) corStatus = '#fbbf24'; 
-                    
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${dataFormatada}</td>
-                            <td style="font-weight: bold;">${nomeExibicao}</td>
-                            <td style="color: #047857; font-weight: bold;">${valorFormatado}</td>
                             <td style="font-size: 12px; font-weight: bold;">${iconePgto}</td>
                             <td style="color: ${corStatus}; font-size: 12px; font-weight: 500;">${v.status_liberacao || 'Consumido ✅'}</td>
                         </tr>
@@ -556,7 +509,6 @@
         function salvarApelido(idMaquina) {
             const novoApelido = document.getElementById('apelido-' + idMaquina).value;
     
-            // Chama o back-end (Render) para fazer o trabalho pesado e seguro
             fetch('/salvar-apelido?maquina=' + idMaquina + '&apelido=' + encodeURIComponent(novoApelido))
                 .then(() => alert('Nome do local salvo com sucesso!'))
                 .catch(erro => alert('Erro ao salvar: ' + erro.message));
